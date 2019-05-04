@@ -281,6 +281,9 @@ function validateFieldAndTypes({op, name, value, schema, fieldType}: {op: string
 
   if (typeof(fieldType) !== 'object') {
     // Primitive fields.
+    if (fieldType == 'Bytes') {
+      value = new Uint8Array(value);
+    }
     const valueType = value.constructor.name === 'Uint8Array' ? 'Uint8Array' : typeof(value);
     if (valueType !== convertToJsType(fieldType, schema.name)) {
       throw new TypeError(

@@ -13,6 +13,7 @@ import '../../modalities/dom/components/elements/camera-input.js';
 import '../../modalities/dom/components/elements/processing/image-processor.js';
 import '../../modalities/dom/components/elements/processing/image-styler.js';
 import '../../modalities/dom/components/elements/processing/image-helper.js';
+import '../../modalities/dom/components/elements/processing/image-segmenter.js';
 
 // requires app-level firebase configuration
 import '../lib/database/firebase-upload.js';

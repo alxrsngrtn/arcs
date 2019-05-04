@@ -14,6 +14,7 @@
 defineParticle(({DomParticle, html, resolver, log}) => {
 
   const template = html`
+    <camera-input on-capture="onCapture"></camera-input>
     <div style="padding: 16px;">
       <h2>Arcs Image Processing Demo</h2>
       <h3>Input an image url</h3>
@@ -45,6 +46,14 @@ defineParticle(({DomParticle, html, resolver, log}) => {
       const url = resolver(this.state.inputUrl);
       this.updateVariable('image', {url});
       this.setState({url});
+    }
+    onCapture(data) {
+      const {pixels, width, height, url} = data.data.value;
+      this.setState({url: url, blob: {
+          blob: new Uint8Array(pixels.buffer),
+          width: width,
+          height: height
+        }});
     }
   };
 

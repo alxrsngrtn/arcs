@@ -15,6 +15,7 @@ const log = Xen.logFactory('ImageStyleTransfer', 'green');
 const template = Xen.html`
 `;
 
+
 /**
  * Apply a style-transfer model to an input image.
  * Passes a new image source to the `on-results` event handler.
@@ -80,7 +81,7 @@ class ImageStyleTransfer extends Xen.Async {
         return;
       }
       this.value = {
-        src: result.src
+        src: result.src,
       };
       this.fire('results');
     });

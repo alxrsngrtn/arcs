@@ -3,4 +3,6 @@ schema ImageUrl
 
 schema ImageBlob
   Bytes blob
+  Number width
+  Number height
 

@@ -1,0 +1,8 @@
+import '../schemas/Image.schema'
+import '../schemas/MlModel.schema'
+
+particle ImageDisplayer in './source/ImageDisplayer.js'
+  in ImageUrl image
+  consume imageView
+
+

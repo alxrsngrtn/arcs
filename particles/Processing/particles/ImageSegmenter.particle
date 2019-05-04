@@ -1,0 +1,9 @@
+import '../schemas/Image.schema'
+import '../schemas/MlModel.schema'
+
+particle ImageSegmenter in './source/ImageSegmenter.js'
+  in ImageUrl image
+  out ImageUrl mask
+  consume root
+
+
