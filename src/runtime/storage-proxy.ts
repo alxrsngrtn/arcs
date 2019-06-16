@@ -99,6 +99,10 @@ export abstract class StorageProxy implements Store {
     }
   }
 
+  deregister(particleIn: Particle, handleIn: Handle): void {
+    this.observers = this.observers.filter(({particle, handle}) => particle !== particleIn || handle !== handleIn);
+  }
+
   /**
    *  Called by ParticleExecutionContext to associate (potentially multiple) particle/handle pairs with this proxy.
    */

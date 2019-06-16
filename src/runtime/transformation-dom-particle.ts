@@ -13,6 +13,14 @@ import {DomParticle} from './dom-particle.js';
 // Regex to separate style and template.
 const re = /<style>((?:.|[\r\n])*)<\/style>((?:.|[\r\n])*)/;
 
+function isEmpty(obj) {
+  for(var key in obj) {
+      if(obj.hasOwnProperty(key))
+          return false;
+  }
+  return true;
+}
+
 /**
  * Particle that does transformation stuff with DOM.
  */
@@ -37,6 +45,8 @@ export class TransformationDomParticle extends DomParticle {
   }
 
   renderHostedSlot(slotName, hostedSlotId, content): void {
+    // We should really clear template and model in the state, but that's a quick hack.
+    if (isEmpty(content)) return;
     this.combineHostedTemplate(slotName, hostedSlotId, content);
     this.combineHostedModel(slotName, hostedSlotId, content);
   }

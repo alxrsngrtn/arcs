@@ -106,6 +106,7 @@ export class DomParticleBase extends Particle {
       slot.render(content);
     } else if (slot.isRendered) {
       // Send empty object, to clear rendered slot contents.
+      // HACK: avoid full clean after reboot, as it messes up with slots somehow :(, fix it properly.
       slot.render({});
     }
     this.currentSlotName = undefined;

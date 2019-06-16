@@ -171,7 +171,7 @@ export class MultiplexerDomParticle extends TransformationDomParticle {
     if (!subId) {
       return;
     }
-    assert(content.templateName, `Template name is missing for slot '${slotName}' (hosted slot ID: '${hostedSlotId}')`);
+    // assert(content.templateName, `Template name is missing for slot '${slotName}' (hosted slot ID: '${hostedSlotId}')`);
     const templateName = {...this._state.templateName, [subId]: `${content.templateName}`};
     this.setState({templateName});
     if (content.template) {
