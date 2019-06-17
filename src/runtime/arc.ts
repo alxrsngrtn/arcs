@@ -74,15 +74,15 @@ export class Arc {
   private readonly storesById = new Map<string, StorageProviderBase>();
   // storage keys for referenced handles
   private storageKeys: Dictionary<string> = {};
-  public readonly storageKey: string;
+  public readonly storageKey?: string;
   storageProviderFactory: StorageProviderFactory;
   // Map from each store to a set of tags. public for debug access
   public readonly storeTags = new Map<StorageProviderBase, Set<string>>();
   // Map from each store to its description (originating in the manifest).
   private readonly storeDescriptions = new Map<StorageProviderBase, string>();
   private waitForIdlePromise: Promise<void> | null;
-  private readonly inspectorFactory: ArcInspectorFactory;
-  public readonly inspector: ArcInspector;
+  private readonly inspectorFactory?: ArcInspectorFactory;
+  public readonly inspector?: ArcInspector;
   private readonly innerArcsByParticle: Map<Particle, Arc[]> = new Map();
   private readonly instantiateMutex = new Mutex();
 
@@ -166,15 +166,17 @@ export class Arc {
   }
 
   get idle(): Promise<void> {
-    if (!this.waitForIdlePromise) {
-      // Store one active completion promise for use by any subsequent callers.
-      // We explicitly want to avoid, for example, multiple simultaneous
-      // attempts to identify idle state each sending their own `AwaitIdle`
-      // message and expecting settlement that will never arrive.
-      this.waitForIdlePromise =
-          this._waitForIdle().then(() => this.waitForIdlePromise = null);
+    if (this.waitForIdlePromise) {
+      return this.waitForIdlePromise;
     }
-    return this.waitForIdlePromise;
+    // Store one active completion promise for use by any subsequent callers.
+    // We explicitly want to avoid, for example, multiple simultaneous
+    // attempts to identify idle state each sending their own `AwaitIdle`
+    // message and expecting settlement that will never arrive.
+    const promise = 
+      this._waitForIdle().then(() => this.waitForIdlePromise = null);
+    this.waitForIdlePromise = promise;
+    return promise;
   }
 
   findInnerArcs(particle: Particle): Arc[] {
@@ -423,10 +425,12 @@ ${this.activeRecipe.toString()}`;
     await this._provisionSpecUrl(recipeParticle.spec);
 
     for (const [name, connection] of Object.entries(recipeParticle.connections)) {
-      const store = this.findStoreById(connection.handle.id);
-      assert(store, `can't find store of id ${connection.handle.id}`);
-      assert(info.spec.handleConnectionMap.get(name) !== undefined, 'can\'t connect handle to a connection that doesn\'t exist');
-      info.stores.set(name, store as StorageProviderBase);
+      if (connection.handle.fate !== '`slot') {
+        const store = this.findStoreById(connection.handle.id);
+        assert(store, `can't find store of id ${connection.handle.id}`);
+        assert(info.spec.handleConnectionMap.get(name) !== undefined, 'can\'t connect handle to a connection that doesn\'t exist');
+        info.stores.set(name, store as StorageProviderBase);
+      }
     }
     this.pec.instantiate(recipeParticle, info.stores);
   }
@@ -584,16 +588,18 @@ ${this.activeRecipe.toString()}`;
         continue;
       }
 
-      let storageKey = recipeHandle.storageKey;
-      if (!storageKey) {
-        storageKey = this.keyForId(recipeHandle.id);
+      if (recipeHandle.fate !== '`slot') {
+        let storageKey = recipeHandle.storageKey;
+        if (!storageKey) {
+          storageKey = this.keyForId(recipeHandle.id);
+        }
+        assert(storageKey, `couldn't find storage key for handle '${recipeHandle}'`);
+        const type = recipeHandle.type.resolvedType();
+        assert(type.isResolved(), `couldn't resolve type ${type.toString()}`);
+        const store = await this.storageProviderFactory.connect(recipeHandle.id, type, storageKey);
+        assert(store, `store '${recipeHandle.id}' was not found`);
+        this._registerStore(store, recipeHandle.tags);
       }
-      assert(storageKey, `couldn't find storage key for handle '${recipeHandle}'`);
-      const type = recipeHandle.type.resolvedType();
-      assert(type.isResolved());
-      const store = await this.storageProviderFactory.connect(recipeHandle.id, type, storageKey);
-      assert(store, `store '${recipeHandle.id}' was not found`);
-      this._registerStore(store, recipeHandle.tags);
     }
 
     await Promise.all(particles.map(recipeParticle => this._instantiateParticle(recipeParticle)));
@@ -608,7 +614,7 @@ ${this.activeRecipe.toString()}`;
     }
   }
 
-  async createStore(type: Type, name?: string, id?: string, tags?: string[], storageKey: string = undefined): Promise<StorageProviderBase> {
+  async createStore(type: Type, name?: string, id?: string, tags?: string[], storageKey?: string): Promise<StorageProviderBase> {
     assert(type instanceof Type, `can't createStore with type ${type} that isn't a Type`);
 
     if (type instanceof RelationType) {
