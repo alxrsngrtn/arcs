@@ -81,6 +81,7 @@ const steps: {[index: string]: ((args?: string[]) => boolean)[]} = {
   bundle: [build, bundle],
   schema2proto: [build, schema2proto],
   schema2pkg: [build, schema2pkg],
+  hotReloadServer: [build, hotReloadServer],
   licenses: [build],
   default: [check, peg, railroad, build, runTests, webpack, webpackTools, lint, tslint],
 };
@@ -843,6 +844,10 @@ function schema2proto(args: string[]) {
 // E.g. $ ./tools/sigh schema2pkg particles/Products/Product.schema
 function schema2pkg(args: string[]) {
   return spawnTool('build/tools/schema2packager.js', args);
+}
+
+function hotReloadServer(args: string[]) {
+  return spawnTool('build/tools/hot-reload-server.js', args);
 }
 
 // Looks up the steps for `command` and runs each with `args`.

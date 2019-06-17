@@ -47,6 +47,8 @@ export class ParticleExecutionHost {
   private idlePromise: Promise<Map<Particle, number[]>> | undefined;
   private idleResolve: ((relevance: Map<Particle, number[]>) => void) | undefined;
 
+  public particles: Particle[] = [];
+
   constructor(port, slotComposer: SlotComposer, arc: Arc) {
     this.close = () => {
       port.close();
@@ -60,7 +62,10 @@ export class ParticleExecutionHost {
 
     this._apiPort = new class extends PECOuterPort {
 
-      onRender(particle: Particle, slotName: string, content: string) {
+      onRender(particle: Particle, slotName: string, content: any) {
+        // if (content.model.name === 'Amora Hotel') debugger;
+        // console.log('onRender', content.templateName, content);
+        // if (content.templateName)
         if (pec.slotComposer) {
           pec.slotComposer.renderSlot(particle, slotName, content);
         }
@@ -288,10 +293,15 @@ export class ParticleExecutionHost {
   }
 
   instantiate(particle: Particle, stores: Map<string, StorageProviderBase>): void {
+    this.particles.push(particle);
     stores.forEach((store, name) => {
       this._apiPort.DefineHandle(store, store.type.resolvedType(), name);
     });
     this._apiPort.InstantiateParticle(particle, particle.id.toString(), particle.spec, stores);
+  }
+
+  reboot(particle: Particle) {
+    this._apiPort.RebootParticle(particle, particle.id.toString());
   }
 
   startRender({particle, slotName, providedSlots, contentTypes}: StartRenderOptions): void {

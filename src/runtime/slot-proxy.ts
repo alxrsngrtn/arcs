@@ -17,11 +17,11 @@ import {PECInnerPort} from './api-channel';
  */
 export class SlotProxy {
   readonly slotName: string;
-  readonly particle: Particle;
+  public particle: Particle;
   readonly providedSlots: ReadonlyMap<string, string>;
   private readonly apiPort: PECInnerPort;
   // eslint-disable-next-line func-call-spacing
-  private readonly handlers = new Map<string, ((event: {}) => void)[]>();
+  public handlers = new Map<string, ((event: {}) => void)[]>();
   readonly requestedContentTypes = new Set<string>();
   private _isRendered = false;
 

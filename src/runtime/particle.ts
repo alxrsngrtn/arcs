@@ -33,7 +33,7 @@ export class Particle {
   private _idleResolver: Runnable;
   private _busy = 0;
 
-  protected slotProxiesByName: Map<string, SlotProxy> = new Map();
+  public slotProxiesByName: Map<string, SlotProxy> = new Map();
   private capabilities: {constructInnerArc?: (particle: Particle) => Promise<InnerArcHandle>};
 
   constructor() {

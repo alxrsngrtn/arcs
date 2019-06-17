@@ -14,7 +14,6 @@ import JSZip from 'jszip';
 
 import {Loader} from '../runtime/loader.js';
 import {Manifest} from '../runtime/manifest.js';
-import {StorageProviderBase} from '../runtime/storage/storage-provider-base.js';
 
 export type BundleEntry = {
   filePath: string,
@@ -75,7 +74,7 @@ export async function bundleListing(...entryPoints: string[]): Promise<BundleEnt
   const entryManifests = await Promise.all(entryPoints.map(ep => Manifest.load(ep, loader)));
   
   const filePathsSet = new Set<string>();
-  entryManifests.forEach(m => collectDependencies(m, filePathsSet));
+  entryManifests.forEach(m => m.collectDependencies(filePathsSet));
   const filePaths = [...filePathsSet].sort();
 
   const prefixLengthToSubtract = dirPrefixForSortedPaths(filePaths);
@@ -97,22 +96,4 @@ function dirPrefixForSortedPaths(paths: string[]): number {
     if (first[i] === '/') prefixLength = i + 1;
   }
   return prefixLength;
-}
-
-function collectDependencies(manifest: Manifest, dependencies: Set<string>) {
-  if (!manifest.fileName) {
-    throw new Error('Missing filename');
-  }
-  dependencies.add(manifest.fileName);
-  for (const particle of manifest.particles) {
-    dependencies.add(particle.implFile);
-  }
-  for (const store of manifest.stores) {
-    if (store instanceof StorageProviderBase && store.source) {
-      dependencies.add(store.source);
-    }
-  }
-  for (const imported of manifest.imports) {
-    collectDependencies(imported, dependencies);
-  }
 }

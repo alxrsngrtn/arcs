@@ -1296,4 +1296,22 @@ ${e.message}
   get idGeneratorForTesting(): IdGenerator {
     return this._idGenerator;
   }
+
+  collectDependencies(dependencies: Set<string>) {
+    if (!this.fileName) {
+      throw new Error('Missing filename');
+    }
+    dependencies.add(this.fileName);
+    for (const particle of this.particles) {
+      dependencies.add(particle.implFile);
+    }
+    for (const store of this.stores) {
+      if (store instanceof StorageProviderBase && store.source) {
+        dependencies.add(store.source);
+      }
+    }
+    for (const imported of this.imports) {
+      imported.collectDependencies(dependencies);
+    }
+  }
 }

@@ -70,9 +70,32 @@ const arcTemplate = `
       float: right;
       margin-right: 8px;
     }
-    #arc-root {
+    #arc-root:not([fullscreen]) {
       margin: 4px 0 12px 0;
       border: 1px solid;
+      position: relative;
+    }
+    #arc-root[fullscreen] {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: white;
+    }
+    #expand {
+      top: 0;
+      right: 0;
+      position: absolute;
+      cursor: pointer;
+    }
+    #arc-modal {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      box-sizing: border-box;
+      pointer-events: none;
     }
     .control {
       display: none;
@@ -103,7 +126,10 @@ const arcTemplate = `
     <span id="arc-label"></span>
     <span id="kill">✘</span>
   </div>
-  <div id="arc-root"></div>
+  <div id="arc-root">
+  <div id="expand">⇪</div>
+  </div>
+  <div id="arc-modal"></div>
   <span id="stores-control" class="control">🗄</span>
   <span id="serial-control" class="control">📄</span>
   <div id="stores" class="control-panel"></div>
@@ -118,6 +144,12 @@ class ArcPanel extends HTMLElement {
 
     this.arcLabel = shadowRoot.getElementById('arc-label');
     this.arcRoot = shadowRoot.getElementById('arc-root');
+    this.arcModal = shadowRoot.getElementById('arc-modal');
+    const expand = shadowRoot.getElementById('expand');
+    expand.addEventListener('click', () => {
+      this.arcRoot.setAttribute('fullscreen', true);
+      expand.style.display = 'none';
+    });
     this.storesControl = shadowRoot.getElementById('stores-control');
     this.serialControl = shadowRoot.getElementById('serial-control');
     this.stores = shadowRoot.getElementById('stores');

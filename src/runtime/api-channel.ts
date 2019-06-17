@@ -149,7 +149,8 @@ class ThingMapper {
   }
 
   createMappingForThing(thing, requestedId=undefined) {
-    assert(!this._reverseIdMap.has(thing));
+    // introduce overrideable mappings, if we want this.
+    //assert(!this._reverseIdMap.has(thing));
     let id;
     if (requestedId) {
       id = requestedId;
@@ -158,9 +159,9 @@ class ThingMapper {
     } else {
       id = this._newIdentifier();
     }
-    assert(!this._idMap.has(id), `${requestedId ? 'requestedId' : (thing.apiChannelMappingId ? 'apiChannelMappingId' : 'newIdentifier()')} ${id} already in use`);
-    // TODO: Awaiting this promise causes tests to fail...
-    floatingPromiseToAudit(this.establishThingMapping(id, thing));
+    // introduce overrideable mappings, if we want this.
+    // assert(!this._idMap.has(id), `${requestedId ? 'requestedId' : (thing.apiChannelMappingId ? 'apiChannelMappingId' : 'newIdentifier()')} ${id} already in use`);
+    this.establishThingMapping(id, thing);
     return id;
   }
 
@@ -436,6 +437,7 @@ export abstract class PECOuterPort extends APIPort {
   @NoArgs Stop() {}
   DefineHandle(@RedundantInitializer store: StorageProviderBase, @ByLiteral(Type) type: Type, @Direct name: string) {}
   InstantiateParticle(@Initializer particle: recipeParticle.Particle, @Identifier @Direct id: string, @ByLiteral(ParticleSpec) spec: ParticleSpec, @ObjectMap(MappingType.Direct, MappingType.Mapped) stores: Map<string, StorageProviderBase>) {}
+  RebootParticle(@Initializer particle: recipeParticle.Particle, @Identifier @Direct id: string) {}
 
   UIEvent(@Mapped particle: recipeParticle.Particle, @Direct slotName: string, @Direct event: {}) {}
   SimpleCallback(@RemoteMapped callback: number, @Direct data: {}) {}
@@ -499,6 +501,7 @@ export abstract class PECInnerPort extends APIPort {
   abstract onStop();
   abstract onDefineHandle(identifier: string, type: Type, name: string);
   abstract onInstantiateParticle(id: string, spec: ParticleSpec, proxies: Map<string, StorageProxy>);
+  abstract onRebootParticle(id: string);
 
   abstract onUIEvent(particle: Particle, slotName: string, event: {});
   abstract onSimpleCallback(callback: (data: {}) => void, data: {});

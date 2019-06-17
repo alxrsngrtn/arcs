@@ -7,8 +7,8 @@
  * subject to an additional IP rights grant found at
  * http://polymer.github.io/PATENTS.txt
  */
-import {FilePane} from './file-pane.js';
-import {OutputPane} from './output-pane.js';
+import './file-pane.js';
+import './output-pane.js';
 import {DevShellLoader} from './loader.js';
 
 import {Runtime} from '../../build/runtime/runtime.js';
@@ -27,6 +27,43 @@ const files = document.getElementById('file-pane');
 const output = document.getElementById('output-pane');
 const toggleFiles = document.getElementById('toggle-files');
 
+import '../../modalities/dom/components/elements/corellia-xen/cx-input.js';
+import '../../modalities/dom/components/elements/corellia-xen/cx-tabs.js';
+import '../../modalities/dom/components/elements/corellia-xen/cx-button.js';
+import '../../modalities/dom/components/elements/video-controller.js';
+import '../../modalities/dom/components/elements/mic-input.js';
+import '../../modalities/dom/components/elements/good-map.js';
+import '../../modalities/dom/components/elements/geo-location.js';
+import '../../modalities/dom/components/elements/model-input.js';
+import '../../modalities/dom/components/elements/model-img.js';
+import '../../modalities/dom/components/elements/dom-repeater.js';
+
+let hot = false;
+
+let ws = new WebSocket('ws://localhost:10101');
+ws.onopen = e => {
+  hot = true;
+  console.log(`Established connection to HotReloadServer.`);
+  ws.onmessage = msg => {
+    const filepath = msg.data;
+    // console.log('Registered modification to: ', filepath);
+    const arcs = [window.arc];
+    for (const inner of window.arc.innerArcsByParticle.values()) {
+      arcs.push(...inner);
+    }
+    for (const arc of arcs) {
+      for (const particle of arc.pec.particles) {
+        if (particle.spec.implFile === filepath) {
+          arc.pec.reboot(particle);
+        }
+      }
+    }
+  }
+};
+ws.onerror = e => {
+  console.log(`No WebSocket connection found.`);
+};
+
 async function wrappedExecute() {
   SlotDomConsumer.clearCache();  // prevent caching of template strings
   document.dispatchEvent(new Event('clear-arcs-explorer'));
@@ -44,8 +81,16 @@ async function wrappedExecute() {
     return;
   }
 
+  // Here we get all files.
+  if (hot) {
+    let depsFiles = new Set();
+    manifest.collectDependencies(depsFiles);
+    depsFiles.delete('./manifest');
+    ws.send(JSON.stringify([...depsFiles]));  
+  }
+
   let arcIndex = 1;
-  for (const recipe of manifest.allRecipes) {
+  for (const recipe of [manifest.allRecipes[0]]) {
     const id = IdGenerator.newSession().newArcId('arc' + arcIndex++);
     const arcPanel = output.addArcPanel(id);
 
@@ -58,7 +103,11 @@ async function wrappedExecute() {
     const slotComposer = new SlotComposer({
       modalityName: Modality.Name.Dom,
       modalityHandler: ModalityHandler.domHandler,
-      rootContainer: arcPanel.arcRoot
+      rootContainer: arcPanel.arcRoot,
+      containers: {
+        modal: arcPanel.arcModal,
+        root: arcPanel.arcRoot,
+      }
     });
     const storage = new StorageProviderFactory(id);
     const arc = new Arc({
@@ -72,11 +121,18 @@ async function wrappedExecute() {
     });
     arcPanel.attachArc(arc);
 
-    const resolver = new RecipeResolver(arc);
-    const resolvedRecipe = await resolver.resolve(recipe);
-    if (!resolvedRecipe) {
-      arcPanel.showError('Error in RecipeResolver');
-      continue;
+    recipe.normalize();
+
+    let resolvedRecipe = null;
+    if (recipe.isResolved()) {
+      resolvedRecipe = recipe;
+    } else {
+      const resolver = new RecipeResolver(arc);
+      resolvedRecipe = await resolver.resolve(recipe);
+      if (!resolvedRecipe) {
+        arcPanel.showError('Error in RecipeResolver');
+        continue;
+      }  
     }
 
     try {
@@ -86,6 +142,8 @@ async function wrappedExecute() {
       continue;
     }
     arcPanel.display(await Runtime.getArcDescription(arc));
+
+    window.arc = arc;
   }
 }
 
@@ -94,7 +152,6 @@ function execute() {
 }
 
 function init() {
-  let manifest;
   const params = new URLSearchParams(window.location.search);
   const manifestParam = params.get('m') || params.get('manifest');
   if (manifestParam) {
@@ -102,26 +159,8 @@ function init() {
     files.seedManifest(manifestParam.split(';').map(m => `import '${m}'`));
   } else {
     const exampleManifest = `\
-import 'https://$particles/Tutorial/1_HelloWorld/HelloWorld.recipe'
-
-schema Data
-  Number num
-  Text txt
-
-resource DataResource
-  start
-  [{"num": 73, "txt": "xyz"}]
-
-store DataStore of Data in DataResource
-
-particle P in 'a.js'
-  consume root
-  in Data data 
-
-recipe
-  use DataStore as h0
-  P
-    data <- h0`;
+import 'https://$particles/Restaurants/Restaurants.recipes'
+`;
 
     const exampleParticle = `\
 defineParticle(({DomParticle, html}) => {
