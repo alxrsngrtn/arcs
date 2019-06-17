@@ -21,7 +21,7 @@ import {RecipeResolver} from '../../build/runtime/recipe/recipe-resolver.js';
 import {SlotComposer} from '../../build/runtime/slot-composer.js';
 import {SlotDomConsumer} from '../../build/runtime/slot-dom-consumer.js';
 import {StorageProviderFactory} from '../../build/runtime/storage/storage-provider-factory.js';
-import {devtoolsInspectorFactory} from '../../build/devtools-connector/devtools-inspector.js';
+import {devtoolsArcInspectorFactory} from '../../build/devtools-connector/devtools-arc-inspector.js';
 
 const files = document.getElementById('file-pane');
 const output = document.getElementById('output-pane');
@@ -68,7 +68,7 @@ async function wrappedExecute() {
       slotComposer,
       loader,
       storageProviderFactory: storage,
-      inspectorFactory: devtoolsInspectorFactory
+      inspectorFactory: devtoolsArcInspectorFactory
     });
     arcPanel.attachArc(arc);
 
@@ -104,17 +104,33 @@ function init() {
     const exampleManifest = `\
 import 'https://$particles/Tutorial/1_HelloWorld/HelloWorld.recipe'
 
+schema Data
+  Number num
+  Text txt
+
+resource DataResource
+  start
+  [{"num": 73, "txt": "xyz"}]
+
+store DataStore of Data in DataResource
+
 particle P in 'a.js'
   consume root
+  in Data data 
 
 recipe
-  P`;
+  use DataStore as h0
+  P
+    data <- h0`;
 
     const exampleParticle = `\
 defineParticle(({DomParticle, html}) => {
   return class extends DomParticle {
     get template() {
-      return html\`<i>In-browser arc, woo</i>\`;
+      return html\`<span>{{num}}</span> : <span>{{str}}</span>\`;
+    }
+    render({data}) {
+      return data ? {num: data.num, str: data.txt} : {};
     }
   };
 });`;

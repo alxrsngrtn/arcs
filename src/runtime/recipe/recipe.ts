@@ -156,22 +156,25 @@ export class Recipe implements Cloneable<Recipe> {
     }
   }
 
-  isResolved(): boolean {
+  isResolved(options=undefined): boolean {
     assert(Object.isFrozen(this), 'Recipe must be normalized to be resolved.');
-    if (this._obligations.length > 0) {
-      return false;
-    }
-    return this._connectionConstraints.length === 0
-        && this.requires.every(require => require.isEmpty())
-        && (this._search === null || this._search.isResolved())
-        && this._handles.every(handle => handle.isResolved())
-        && this._particles.every(particle => particle.isResolved())
-        && this.modality.isResolved()
-        && this.allRequiredSlotsPresent()
-        && this._slots.every(slot => slot.isResolved())
-        && this.handleConnections.every(connection => connection.isResolved())
-        && this.slotConnections.every(slotConnection => slotConnection.isResolved());
-
+    const checkThat = (check: boolean, label: string) => {
+      if (!check && options && options.errors) {
+        options.errors.set(this.name, label);
+      }
+      return check;
+    };
+    return checkThat(this._obligations.length === 0, 'unresolved obligations')
+    && checkThat(this._connectionConstraints.length === 0, 'unresolved constraints')
+    && checkThat(this.requires.every(require => require.isEmpty()), 'unresolved require')
+    && checkThat((this._search === null || this._search.isResolved()), 'unresolved search')
+    && checkThat(this._handles.every(handle => handle.isResolved()), 'unresolved handles')
+    && checkThat(this._particles.every(particle => particle.isResolved(options)), 'unresolved particles')
+    && checkThat(this.modality.isResolved(), 'unresolved modality')
+    && checkThat(this.allRequiredSlotsPresent(options), 'unresolved required slot')
+    && checkThat(this._slots.every(slot => slot.isResolved()), 'unresolved slots')
+    && checkThat(this.handleConnections.every(connection => connection.isResolved()), 'unresolved handle connections')
+    && checkThat(this.slotConnections.every(slotConnection => slotConnection.isResolved()), 'unresolved slot connections');
     // TODO: check recipe level resolution requirements, eg there is no slot loops.
   }
 
@@ -184,32 +187,46 @@ export class Recipe implements Cloneable<Recipe> {
       .reduce((modality, total) => modality.intersection(total), Modality.all);
   }
 
-  allRequiredSlotsPresent(): boolean {
+  allRequiredSlotsPresent(options=undefined): boolean {
     // All required slots and at least one consume slot for each particle must be present in order for the 
-    // recipe to be considered resolved. 
+    // recipe to be considered resolved.
     for (const particle of this.particles) {
       if (particle.spec.slotConnections.size === 0) {
         continue;
       }
 
       let atLeastOneSlotConnection = false;
+      let usesSlandles = false;
+      for (const handleSpec of Object.values(particle.spec.connections)) {
+        if (handleSpec.type.isSlot() ||
+          (handleSpec.type.isCollectionType() && handleSpec.type.collectionType.isSlot())) {
+          usesSlandles = true;
+        }
+      }
       for (const [name, slotSpec] of particle.spec.slotConnections) {
         if (slotSpec.isRequired && !particle.consumedSlotConnections[name]) {
+          if (options && options.errors) {
+            options.errors.set(name, `required slot ${name} has no matching connection`);
+          }
           return false;
         }
         // required provided slots are only required when the corresponding consume slot connection is present
         if (particle.consumedSlotConnections[name]) {
+          atLeastOneSlotConnection = true;
           for (const providedSlotSpec of slotSpec.provideSlotConnections) {
             if (providedSlotSpec.isRequired && !particle.getProvidedSlotByName(name, providedSlotSpec.name)) {
+              if (options && options.errors) {
+                options.errors.set(name, `required provided slot ${providedSlotSpec.name} has no matching connection`);
+              }
               return false;
             }
           }
         }
-        if (particle.consumedSlotConnections[name]) {
-          atLeastOneSlotConnection = true;
-        }
       }
-      if (!atLeastOneSlotConnection) {
+      if (!usesSlandles && !atLeastOneSlotConnection) {
+        if (options && options.errors) {
+          options.errors.set(`?`, `no slot connections`);
+        }
         return false;
       }
     }
@@ -279,7 +296,7 @@ export class Recipe implements Cloneable<Recipe> {
   }
 
   get handleConnections(): HandleConnection[] {
-    const handleConnections = [];
+    const handleConnections: HandleConnection[] = [];
     this._particles.forEach(particle => {
       handleConnections.push(...Object.values(particle.connections));
       handleConnections.push(...particle._unnamedConnections);
@@ -501,9 +518,9 @@ export class Recipe implements Cloneable<Recipe> {
 
   _copyInto(recipe: Recipe, cloneMap): void {
     const variableMap = new Map();
-    function cloneTheThing(object) {
-      const clonedObject = object._copyInto(recipe, cloneMap, variableMap);
-      cloneMap.set(object, clonedObject);
+    function cloneTheThing(ob: {_copyInto}) {
+      const clonedObject = ob._copyInto(recipe, cloneMap, variableMap);
+      cloneMap.set(ob, clonedObject);
     }
 
     recipe._name = this.name;
@@ -525,7 +542,7 @@ export class Recipe implements Cloneable<Recipe> {
 
     recipe.patterns = recipe.patterns.concat(this.patterns);
   }
-  
+
   // tslint:disable-next-line: no-any
   updateToClone(dict: Dictionary<any>): Dictionary<any> {
     const result = {};
@@ -588,7 +605,7 @@ export class Recipe implements Cloneable<Recipe> {
   // use { showUnresolved: true } in options to see why a recipe can't resolve.
   toString(options: ToStringOptions = undefined): string {
     const nameMap = this._makeLocalNameMap();
-    const result = [];
+    const result: string[] = [];
     const verbs = this.verbs.length > 0 ? ` ${this.verbs.map(verb => `&${verb}`).join(' ')}` : '';
     result.push(`recipe${this.name ? ` ${this.name}` : ''}${verbs}`);
     if (options && options.showUnresolved) {
@@ -697,7 +714,7 @@ export class RequireSection extends Recipe {
     if (nameMap == undefined) {
       nameMap = this._makeLocalNameMap();
     }
-    const result = [];
+    const result: string[] = [];
     result.push(`require`);
     if (options && options.showUnresolved) {
       if (this.search) {

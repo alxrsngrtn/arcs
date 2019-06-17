@@ -28,7 +28,7 @@ class TestPlanProducer extends PlanProducer {
   producePromises = [];
   plannerNextResults: Suggestion[][] = [];
   plannerPromise = null;
-  
+
   constructor(arc, store) {
     super(arc, new PlanningResult({context: arc.context, loader: arc.loader}, store));
   }
@@ -51,7 +51,7 @@ class TestPlanProducer extends PlanProducer {
 
   async runPlanner(options, generations): Promise<Suggestion[]> {
     this.plannerRunOptions.push(options);
-    
+
     return new Promise<Suggestion[]>((resolve, reject) => {
       const suggestions: Suggestion[] = this.plannerNextResults.shift();
 
@@ -84,7 +84,7 @@ class TestPlanProducer extends PlanProducer {
         manifestFilename: './src/runtime/test/artifacts/Products/Products.recipes',
         storageKey: 'firebase://xxx.firebaseio.com/yyy/serialization/demo'
       });
-      const store = await Planificator['_initSuggestStore'](helper.arc, /* userid= */ 'TestUser', storageKeyBase);
+      const store = await Planificator['_initSuggestStore'](helper.arc, storageKeyBase);
       assert.isNotNull(store);
       const producer = new TestPlanProducer(helper.arc, store);
       return {helper, producer};
@@ -110,7 +110,7 @@ class TestPlanProducer extends PlanProducer {
     assert.lengthOf(producer.result.suggestions, 0);
 
     for (let i = 0; i < 10; ++i) {
-      producer.produceSuggestions({test: i});
+      await producer.produceSuggestions({test: i});
     }
 
     producer.plannerReturnResults(helper.suggestions);
@@ -127,8 +127,8 @@ class TestPlanProducer extends PlanProducer {
     const {helper, producer} = await createProducer('./src/runtime/test/artifacts/Products/Products.recipes');
     assert.lengthOf(producer.result.suggestions, 0);
 
-    producer.produceSuggestions();
-    producer.produceSuggestions({cancelOngoingPlanning: true});
+    await producer.produceSuggestions();
+    await producer.produceSuggestions({cancelOngoingPlanning: true});
 
     producer.plannerReturnResults(helper.suggestions);
     await producer.allPlanningDone();
@@ -142,7 +142,7 @@ describe('plan producer - search', () => {
   class TestSearchPlanProducer extends PlanProducer {
     options;
     produceSuggestionsCalled = 0;
-    
+
     constructor(arc: Arc, searchStore: SingletonStorageProvider) {
       super(arc, new PlanningResult({context: arc.context, loader: arc.loader}, searchStore), searchStore);
     }
@@ -153,11 +153,11 @@ describe('plan producer - search', () => {
     }
 
     async setNextSearch(search: string) {
-      this.searchStore.set([{arc: this.arc.id.idTreeAsString(), search}]);
+      await this.searchStore.set([{arc: this.arc.id.idTreeAsString(), search}]);
       return this.onSearchChanged();
     }
   }
-  
+
   async function init(): Promise<TestSearchPlanProducer> {
     const loader = new Loader();
     const manifest = await Manifest.parse(`
@@ -166,7 +166,7 @@ describe('plan producer - search', () => {
     `);
     const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id: ArcId.newForTest('test'),
                          storageKey: 'volatile://test^^123'});
-    const searchStore = await Planificator['_initSearchStore'](arc, /* userid= */ 'TestUser');
+    const searchStore = await Planificator['_initSearchStore'](arc);
 
     const producer = new TestSearchPlanProducer(arc, searchStore);
     assert.isUndefined(producer.search);

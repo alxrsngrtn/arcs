@@ -10,7 +10,7 @@
 
 // configure
 import '../../lib/platform/loglevel-web.js';
-import {version, paths, storage} from './config.js';
+import {version, paths, storage, test} from './config.js';
 
 // optional
 //import '../../lib/database/pouchdb-support.js';
@@ -23,7 +23,7 @@ import {DomSlotComposer} from '../../lib/components/dom-slot-composer.js';
 import {RamSlotComposer} from '../../lib/components/ram-slot-composer.js';
 import {findContainers} from '../lib/utils.js';
 import {initPipe} from '../pipe.js';
-import {test} from '../smoke.js';
+import {smokeTest} from '../smoke.js';
 
 console.log(`${version} -- ${storage}`);
 
@@ -40,7 +40,7 @@ const composerFactory = modality => {
   }
 };
 
-const client = window.client || {};
+const client = window.DeviceClient || {};
 
 (async () => {
   // if remote DevTools are requested, wait for connect
@@ -49,10 +49,14 @@ const client = window.client || {};
   const bus = await initPipe(client, paths, storage, composerFactory);
   // export bus
   window.ShellApi = bus;
-  // run some examples
-  test(bus);
-  // world's dumbest ui
-  window.onclick = () => {
-    bus.receive({message: 'ingest', modality: 'dom', entity: {type: 'caption', name: 'Dogs are awesome'}});
-  };
+  // notify client
+  bus.send({message: 'ready'});
+  // run smokeTest if requested
+  if (test) {
+    smokeTest(bus);
+    // world's dumbest ui
+    window.onclick = () => {
+      bus.receive({message: 'ingest', modality: 'dom', entity: {type: 'caption', name: 'Dogs are awesome'}});
+    };
+  }
 })();

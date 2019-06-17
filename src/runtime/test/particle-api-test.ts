@@ -643,8 +643,8 @@ describe('particle-api', () => {
 
     const result = arc.context.findSchemaByName('Result').entityClass();
     const inputsStore = await arc.createStore(result.type.collectionOf(), undefined, 'test:1') as CollectionStorageProvider;
-    inputsStore.store({id: '1', rawData: {value: 'hello'}}, ['key1']);
-    inputsStore.store({id: '2', rawData: {value: 'world'}}, ['key2']);
+    await inputsStore.store({id: '1', rawData: {value: 'hello'}}, ['key1']);
+    await inputsStore.store({id: '2', rawData: {value: 'world'}}, ['key2']);
     const resultsStore = await arc.createStore(result.type.collectionOf(), undefined, 'test:2');
     const inspector = new util.ResultInspector(arc, resultsStore, 'value');
     const recipe = arc.context.recipes[0];
@@ -762,7 +762,7 @@ describe('particle-api', () => {
 
     const dataClass = arc.context.findSchemaByName('Data').entityClass();
     const bigStore = await arc.createStore(dataClass.type.bigCollectionOf(), 'big', 'test:0') as BigCollectionStorageProvider;
-    const promises = [];
+    const promises: Promise<void>[] = [];
     for (let i = 1; i <= 5; i++) {
       promises.push(bigStore.store({id: 'i' + i, rawData: {value: 'v' + i}}, ['k' + i]));
     }
@@ -823,7 +823,7 @@ describe('particle-api', () => {
     
     await arc.instantiate(recipe);
 
-    (inStore as unknown as SingletonStore).set({id: '1', rawData: {}}, 'a');
+    await (inStore as unknown as SingletonStore).set({id: '1', rawData: {}}, 'a');
     await arc.idle;
     await util.assertSingletonIs(outStore, 'result', 'hi');
   });
@@ -874,7 +874,7 @@ describe('particle-api', () => {
     
     await arc.instantiate(recipe);
 
-    (inStore as unknown as SingletonStore).set({id: '1', rawData: {}}, 'a');
+    await (inStore as unknown as SingletonStore).set({id: '1', rawData: {}}, 'a');
     await arc.idle;
     await util.assertSingletonIs(outStore, 'result', 'hi');
   });
@@ -926,7 +926,7 @@ describe('particle-api', () => {
     await arc.instantiate(recipe);
 
     await arc.idle;
-    (inStore as unknown as SingletonStore).set({id: '1', rawData: {}}, 'a');
+    await (inStore as unknown as SingletonStore).set({id: '1', rawData: {}}, 'a');
     await arc.idle;
     await util.assertSingletonIs(outStore, 'result', 'hi');
   });
