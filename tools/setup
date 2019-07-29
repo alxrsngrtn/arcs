@@ -40,11 +40,13 @@ status "4. Install dependencies"
 (cd $ROOT && npm ci && npm --prefix=server ci) || fail 'Failed to install dependencies.'
 
 
-echo "$GRN$BLD\n\nSETUP COMPLETE\n$END"
-echo "Next, try the following:\n"
+echo "$GRN$BLD\n\nSETUP COMPLETE$END\n"
+echo "node --version"
+node --version
+echo "npm --version"
+npm --version
+echo "\nNext, try the following:\n"
 echo "- Setup git hooks: $CMD\`git config core.hooksPath tools/hooks\`$END"
 echo "- Serve the project: $CMD\`npm start\`$END"
-echo "- Run tests:"
-echo "  - $CMD\`./tools/sigh test\`$END"
-echo "  - $CMD\`./tools/test\`$END"
+echo "- Run tests: $CMD\`./tools/sigh test\`$END"
 
