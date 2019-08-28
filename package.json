@@ -106,6 +106,8 @@
     "ws": "~6.0.0"
   },
   "sighDependencies": {
+    "@bazel/bazel": "0.26.0",
+    "@bazel/ibazel": "^0.10.3",
     "chokidar": "^3.0.2",
     "emsdk-npm": "github:mykmartin/emsdk-npm#arcs",
     "request": "^2.88.0",

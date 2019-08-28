@@ -16,12 +16,12 @@ must be build first.
 
 ## Running
 
-First, ensure xcode + command lines tools are installed.
-Run install_dependencies.sh to insure Bazel and iBazel
-are installed. Run tools/sigh build and shells/pipes-shell/web/deploy/deploy.sh
-
-Then launch hotreload.sh and everything should build and run a server on port
-6006.
-
-Visit [http://localhost:6006/javaharness_dev.html?user=harness&solo=particles/PipeApps/PipeApps.recipes&log=2]()
+1. Prerequisites
+   - OSX: Ensure Xcode + command lines tools are installed.
+2. Install Bazel and iBazel: `tools/sigh install @bazel/bazel @bazel/ibazel` (required once per checkout)
+   - OSX / Linux: Run `install_dependencies.sh` (global install)
+3. Run `tools/sigh build`
+4. Run `shells/pipes-shell/web/deploy/deploy.sh`
+5. Launch `hotreload.sh` and everything should build and run a server on port 6006. (Must be in javaharness directory.)
+6. Visit [http://localhost:6006/javaharness_dev.html?user=harness&solo=particles/PipeApps/PipeApps.recipes&log=2]()
 to try it out.
