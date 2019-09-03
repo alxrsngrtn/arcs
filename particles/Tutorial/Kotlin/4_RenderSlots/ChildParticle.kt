@@ -8,13 +8,13 @@ import kotlin.native.internal.ExportForCppRuntime
 class ChildParticle : Particle() {
 
   override fun onHandleUpdate(handle: Handle) {
-    renderSlot("root")
+    renderSlot("mySlot")
   }
 
   override fun onHandleSync(handle: Handle, willSync: Boolean) {
     if(willSync) {
       log("All handles synched\n")
-      renderSlot("root")
+      renderSlot("mySlot")
     }
   }
 
