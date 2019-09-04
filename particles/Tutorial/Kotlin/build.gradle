@@ -49,7 +49,6 @@ kotlin {
     sourceSets {
         wasm32Main {
             kotlin.srcDir('1_HelloWorld')
-
         }
     }
 
@@ -57,7 +56,6 @@ kotlin {
     sourceSets {
         wasm32Main {
             kotlin.srcDir('2_BasicTemplates')
-
         }
     }
 
@@ -65,7 +63,13 @@ kotlin {
     sourceSets {
         wasm32Main {
             kotlin.srcDir('3_JsonStore')
+        }
+    }
 
+    wasm32("RenderSlots")
+    sourceSets {
+        wasm32Main {
+            kotlin.srcDir('4_RenderSlots')
         }
     }
 
