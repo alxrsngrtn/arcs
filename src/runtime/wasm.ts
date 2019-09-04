@@ -11,7 +11,8 @@
 import {assert} from '../platform/assert-web.js';
 import {Schema} from './schema.js';
 import {Entity, EntityRawData} from './entity.js';
-import {Particle} from './particle.js';
+// import {Particle} from './particle.js';
+import {DomParticleBase} from './dom-particle-base.js';
 import {Handle, Singleton, Collection} from './handle.js';
 import {Content} from './slot-consumer.js';
 import {Dictionary} from './hot.js';
@@ -504,7 +505,7 @@ export class WasmContainer {
 }
 
 // Creates and interfaces to a particle inside a WasmContainer's module.
-export class WasmParticle extends Particle {
+export class WasmParticle extends DomParticleBase {
   private id: string;
   private container: WasmContainer;
   // tslint:disable-next-line: no-any
@@ -671,6 +672,7 @@ export class WasmParticle extends Particle {
 
   // Called by the shell to initiate rendering; the particle will call env._render in response.
   renderSlot(slotName: string, contentTypes: string[]) {
+    // TODO: call prepareSlotIds in here
     const p = this.container.store(slotName);
     const sendTemplate = contentTypes.includes('template');
     const sendModel = contentTypes.includes('model');

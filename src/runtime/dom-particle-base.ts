@@ -17,6 +17,59 @@ import {Content} from './slot-consumer.js';
 export type RenderModel = object;
 
 /**
+ * Backwards-compatibility and convenience code:
+ * - Rewrites slotid="slotName" to slotid$="{{$slotName}}" in templates.
+ * - Enhances the model with `$slotName` fields.
+ */
+function prepareSlotIds(slot: SlotProxy, content: Content) {
+  if (slot.providedSlots.size > 0) {
+    if (content.template) {
+      if (typeof content.template === 'string') {
+        content.template = slotNamesToModelReferences(slot, content.template);
+      } else {
+        content.template = Object.entries(content.template).reduce(
+          (templateDictionary, [templateName, templateValue]) => {
+            templateDictionary[templateName] = slotNamesToModelReferences(slot, templateValue as string);
+            return templateDictionary;
+          }, {});
+      }
+    }
+    if (content.model) {
+      const slotIDs = {};
+      slot.providedSlots.forEach((slotId, slotName) => slotIDs[`$${slotName}`] = slotId);
+      content.model = enhanceModelWithSlotIDs(content.model, slotIDs);
+    }
+  }
+}
+
+function slotNamesToModelReferences(slot: SlotProxy, template: string) {
+  slot.providedSlots.forEach((slotId, slotName) => {
+    // TODO: This is a simple string replacement right now,
+    // ensuring that 'slotid' is an attribute on an HTML element would be an improvement.
+    // TODO(sjmiles): clone original id as `slotname` for human readability
+    template = template.replace(new RegExp(`slotid="${slotName}"`, 'gi'), `slotname="${slotName}" slotid$="{{$${slotName}}}"`);
+  });
+  return template;
+}
+
+// We put slot IDs at the top-level of the model as well as in models for sub-templates.
+// This is temporary and should go away when we move from sub-IDs to [(Entity, Slot)] constructs.
+function enhanceModelWithSlotIDs(model: RenderModel, slotIDs: object, topLevel: boolean = true): RenderModel {
+  if (topLevel) {
+    model = {...slotIDs, ...model};
+  }
+  if (model.hasOwnProperty('$template') && model.hasOwnProperty('models') && Array.isArray(model['models'])) {
+    model['models'] = model['models'].map(m => enhanceModelWithSlotIDs(m, slotIDs));
+  }
+  for (const [key, value] of Object.entries(model)) {
+    if (!!value && typeof value === 'object') {
+      model[key] = enhanceModelWithSlotIDs(value, slotIDs, false);
+    }
+  }
+  return model;
+}
+
+/**
  * Particle that interoperates with DOM.
  */
 export class DomParticleBase extends Particle {
@@ -82,27 +135,7 @@ export class DomParticleBase extends Particle {
       }
       content.templateName = this.getTemplateName(slot.slotName);
 
-      // Backwards-compatibility and convenience code:
-      //  - Rewrites slotid="slotName" to slotid$="{{$slotName}}" in templates.
-      //  - Enhances the model with `$slotName` fields.
-      if (slot.providedSlots.size > 0) {
-        if (content.template) {
-          if (typeof content.template === 'string') {
-            content.template = this.slotNamesToModelReferences(slot, content.template);
-          } else {
-            content.template = Object.entries(content.template).reduce(
-                (templateDictionary, [templateName, templateValue]) => {
-                  templateDictionary[templateName] = this.slotNamesToModelReferences(slot, templateValue as string);
-                return templateDictionary;
-              }, {});
-          }
-        }
-        if (content.model) {
-          const slotIDs = {};
-          slot.providedSlots.forEach((slotId, slotName) => slotIDs[`$${slotName}`] = slotId);
-          content.model = this.enhanceModelWithSlotIDs(content.model, slotIDs);
-        }
-      }
+      prepareSlotIds.call(this, slot, content);
 
       slot.render(content);
     } else if (slot.isRendered) {
@@ -112,32 +145,6 @@ export class DomParticleBase extends Particle {
     this.currentSlotName = undefined;
   }
 
-  private slotNamesToModelReferences(slot: SlotProxy, template: string) {
-    slot.providedSlots.forEach((slotId, slotName) => {
-      // TODO: This is a simple string replacement right now,
-      // ensuring that 'slotid' is an attribute on an HTML element would be an improvement.
-      // TODO(sjmiles): clone original id as `slotname` for human readability
-      template = template.replace(new RegExp(`slotid="${slotName}"`, 'gi'), `slotname="${slotName}" slotid$="{{$${slotName}}}"`);
-    });
-    return template;
-  }
-
-  // We put slot IDs at the top-level of the model as well as in models for sub-templates.
-  // This is temporary and should go away when we move from sub-IDs to [(Entity, Slot)] constructs.
-  private enhanceModelWithSlotIDs(model: RenderModel, slotIDs: object, topLevel: boolean = true): RenderModel {
-    if (topLevel) {
-      model = {...slotIDs, ...model};
-    }
-    if (model.hasOwnProperty('$template') && model.hasOwnProperty('models') && Array.isArray(model['models'])) {
-      model['models'] = model['models'].map(m => this.enhanceModelWithSlotIDs(m, slotIDs));
-    }
-    for (const [key, value] of Object.entries(model)) {
-      if (!!value && typeof value === 'object') {
-      model[key] = this.enhanceModelWithSlotIDs(value, slotIDs, false);
-      }
-    }
-    return model;
-  }
 
   protected _getStateArgs() {
     return [];
@@ -157,7 +164,7 @@ export class DomParticleBase extends Particle {
     }
   }
 
-  async setParticleDescription(pattern: string | {template, model: {}}): Promise<boolean | undefined> {
+  async setParticleDescription(pattern: string | { template, model: {} }): Promise<boolean | undefined> {
     if (typeof pattern === 'string') {
       return super.setParticleDescription(pattern);
     }
