@@ -5,3 +5,4 @@ kt_wasm_library(
     srcs = glob(["src/arcs/*.kt"]),
     visibility = ["//visibility:public"],
 )
+
