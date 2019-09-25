@@ -10,23 +10,7 @@ arcs_kt_schema(
 )
 
 kt_wasm_library(
-    name = "particle_interop",
-    srcs = glob(["sdk/arcs/*.kt"]),
-)
-
-kt_wasm_binary(
-    name = "service_particle",
-    srcs = ["wasm/arcs/ServiceParticle.kt"],
-    deps = [":particle_interop"],
-    entry_point = "arcs.main"
-)
-
-kt_wasm_binary(
-    name = "test_harness",
-    srcs = [
-        "wasm/arcs/TestParticle.kt",
-        "wasm/arcs/Entities.kt"
-        ],
-    deps = [":particle_interop"],
-    entry_point = "arcs.main"
+    name = "particle_sdk",
+    srcs = glob(["src/arcs/*.kt"]),
+    visibility = ["//visibility:public"]
 )
