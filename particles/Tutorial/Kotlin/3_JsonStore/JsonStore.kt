@@ -12,7 +12,7 @@ class JsonStoreParticle : Particle() {
     registerHandle("inputData", res)
   }
 
-  override fun populateModel(slotName: String, model: Map<String, String>): Map<String, String> {
+  override fun populateModel(model: Map<String, String>): Map<String, String> {
     val person = res.get() ?: PersonDetails("", 0.0)
 
     return model + mapOf(
@@ -36,7 +36,7 @@ class JsonStoreParticle : Particle() {
     log(s)
   }
 
-  override fun getTemplate(slotName: String): String {
+  override fun getTemplate(): String {
     log("getting template")
       return """<b>Hello, <span>{{name}}</span>, aged <span>{{age}}</span>!</b>"""
   }

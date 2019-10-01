@@ -24,8 +24,8 @@ interface IParticle {
     fun resolveUrl(url: String): String
 
     fun init()
-    fun getTemplate(slotName: String): String
-    fun populateModel(slotName: String, model: Map<String, String> = mapOf()): Map<String, String>
+    fun getTemplate(): String
+    fun populateModel(model: Map<String, String> = mapOf()): Map<String, String>
 }
 
 /**
@@ -82,8 +82,8 @@ abstract class Particle : IParticle {
 
 
     override fun init() {}
-    override fun getTemplate(slotName: String): String = ""
-    override fun populateModel(slotName: String, model: Map<String, String>): Map<String, String> = model
+    override fun getTemplate(): String = ""
+    override fun populateModel(model: Map<String, String>): Map<String, String> = model
     override fun serviceResponse(call: String, response: Map<String, String>, tag: String) {}
 
 }
@@ -91,9 +91,8 @@ abstract class Particle : IParticle {
 class WasmParticle(particle: Particle) : WasmObject(), IParticle by particle {
     override fun renderOutput() {
         log("renderOutput")
-        val slotName = ""
-        val template = getTemplate(slotName)
-        val dict = populateModel(slotName)
+        val template = getTemplate()
+        val dict = populateModel()
         val model = StringEncoder.encodeDictionary(dict)
         onRenderOutput(this.toWasmAddress(), template.toWasmString(), model.toWasmString())
     }

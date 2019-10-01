@@ -16,7 +16,7 @@ class ServiceParticle : Particle() {
     serviceRequest("random.next", tag="second")
   }
 
-  override fun getTemplate(slotName: String): String {
+  override fun getTemplate(): String {
     return """<h2>Classification with ML5 in WASM via Kotlin</h2>
               <img style="max-width: 240px;" src="{{imageUrl}}"><br>
               <div>Label: <span>{{label}}</span></div>
@@ -29,7 +29,7 @@ class ServiceParticle : Particle() {
               </ul>"""
   }
 
-  override fun populateModel(slotName: String, model: Map<String, String>): Map<String, String> {
+  override fun populateModel(model: Map<String, String>): Map<String, String> {
     return model + mapOf(
       "imageUrl" to url,
       "label" to label,

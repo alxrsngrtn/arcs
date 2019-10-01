@@ -22,7 +22,7 @@ class ChildParticle : Particle() {
       log(s)
     }
 
-    override fun getTemplate(slotName: String): String {
+    override fun getTemplate(): String {
       log("In Child Getting Template")
       return """Child"""
     }

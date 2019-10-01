@@ -7,7 +7,7 @@ import kotlin.native.internal.ExportForCppRuntime
  */
 class BasicTemplateParticle : Particle() {
 
-  override fun populateModel(slotName: String, model: Map<String, String>): Map<String, String> {
+  override fun populateModel(model: Map<String, String>): Map<String, String> {
     return model + mapOf(
       "name" to "Human"
     )
@@ -28,7 +28,7 @@ class BasicTemplateParticle : Particle() {
       log(s)
     }
 
-    override fun getTemplate(slotName: String): String {
+    override fun getTemplate(): String {
         return """<b>Hello, <span>{{name}}</span>!</b>"""
       }
 }

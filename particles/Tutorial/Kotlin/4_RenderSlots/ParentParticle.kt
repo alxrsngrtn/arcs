@@ -24,7 +24,7 @@ class ParentParticle : Particle() {
       log(s)
     }
 
-    override fun getTemplate(slotName: String): String {
+    override fun getTemplate(): String {
       log("In Parent Getting Template")
         return """<b>Hello:</b><div slotId="mySlot"></div>"""
     }

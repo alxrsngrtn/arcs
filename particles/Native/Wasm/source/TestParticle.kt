@@ -31,7 +31,7 @@ class TestParticle : Particle() {
       log(s)
     }
 
-    override fun getTemplate(slotName: String): String {
+    override fun getTemplate(): String {
       log("getting template")
       val dataCol = if (updated == 1) "color: blue;" else ""
       val dataStr = "${data.get().toString()}\n"

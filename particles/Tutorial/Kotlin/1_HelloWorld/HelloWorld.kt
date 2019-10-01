@@ -22,7 +22,7 @@ class HelloWorldParticle : Particle() {
       log(s)
     }
 
-    override fun getTemplate(slotName: String): String {
+    override fun getTemplate(): String {
         return """<b>Hello, world!</b>"""
       }
 }
