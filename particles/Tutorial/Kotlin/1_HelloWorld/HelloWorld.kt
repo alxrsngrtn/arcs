@@ -31,5 +31,5 @@ class HelloWorldParticle : Particle() {
 @ExportForCppRuntime("_newHelloWorldParticle")
 fun constructHelloWorldParticle(): WasmAddress {
     log("_newHelloWorldParticle called")
-    return HelloWorldParticle().toWasmAddress()
+    return WasmParticle(HelloWorldParticle()).toWasmAddress()
 }

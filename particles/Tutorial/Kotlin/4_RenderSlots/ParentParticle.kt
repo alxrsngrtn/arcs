@@ -34,5 +34,5 @@ class ParentParticle : Particle() {
 @ExportForCppRuntime("_newParentParticle")
 fun constructParentParticle(): WasmAddress {
     log("_newParentParticle called")
-    return ParentParticle().toWasmAddress()
+    return WasmParticle(ParentParticle()).toWasmAddress()
 }

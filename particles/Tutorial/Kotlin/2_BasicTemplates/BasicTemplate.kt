@@ -37,5 +37,5 @@ class BasicTemplateParticle : Particle() {
 @ExportForCppRuntime("_newBasicTemplateParticle")
 fun constructBasicTemplateParticle(): WasmAddress {
     log("_newBasicTemplateParticle called")
-    return BasicTemplateParticle().toWasmAddress()
+    return WasmParticle(BasicTemplateParticle()).toWasmAddress()
 }

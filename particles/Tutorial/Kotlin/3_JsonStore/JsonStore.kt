@@ -46,5 +46,5 @@ class JsonStoreParticle : Particle() {
 @ExportForCppRuntime("_newJsonStoreParticle")
 fun constructJsonStoreParticle(): WasmAddress {
   log("_newJsonStoreParticle called")
-  return JsonStoreParticle().toWasmAddress()
+  return WasmParticle(JsonStoreParticle()).toWasmAddress()
 }

@@ -147,5 +147,5 @@ class TestParticle : Particle() {
 @ExportForCppRuntime("_newTestParticle")
 fun construct(): WasmAddress {
     log("__newTestParticle called")
-    return TestParticle().toWasmAddress()
+    return WasmParticle(TestParticle()).toWasmAddress()
 }

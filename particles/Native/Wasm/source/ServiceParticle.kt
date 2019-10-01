@@ -71,5 +71,5 @@ class ServiceParticle : Particle() {
 @ExportForCppRuntime("_newServiceParticle")
 fun constructServiceParticle(): WasmAddress {
   log("__newServiceParticle called")
-  return ServiceParticle().toWasmAddress()
+  return WasmParticle(ServiceParticle()).toWasmAddress()
 }
