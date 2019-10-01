@@ -13,7 +13,7 @@ class JsonStoreParticle : Particle() {
   }
 
   override fun populateModel(slotName: String, model: Map<String, String>): Map<String, String> {
-    val person = res.get() ?: PersonDetails("", 0.0);
+    val person = res.get() ?: PersonDetails("", 0.0)
 
     return model + mapOf(
       "name" to person.name,
