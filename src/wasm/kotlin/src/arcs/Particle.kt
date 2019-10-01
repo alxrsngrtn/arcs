@@ -1,6 +1,7 @@
 package arcs
 
 import kotlin.collections.set
+import arcs.api.Particle
 
 typealias URL = String
 
@@ -10,26 +11,47 @@ abstract class Entity<T> {
     abstract fun encodeEntity(): String
 }
 
+interface IParticle {
+    fun registerHandle(name: String, handle: Handle)
+    fun eventHandler(name: String, handler: () -> Unit)
+    fun connectHandle(handleName: String, willSync: Boolean): Handle?
+    fun sync(handle: Handle)
+    fun onHandleUpdate(handle: Handle)
+    fun onHandleSync(handle: Handle, allSynced: Boolean)
+
+    fun renderSlot(slotName: String, sendTemplate: Boolean = true, sendModel: Boolean = true)
+    fun fireEvent(slotName: String, eventName: String)
+
+    fun serviceRequest(call: String, args: Map<String, String> = mapOf(), tag: String = "")
+    fun serviceResponse(call: String, response: Map<String, String>, tag: String = "")
+    fun resolveUrl(url: String): String
+
+    fun init()
+    fun getTemplate(slotName: String): String
+    fun populateModel(slotName: String, model: Map<String, String> = mapOf()): Map<String, String>
+
+}
+
 /**
  * Base class for all Wasm Particles.
  */
-abstract class Particle : WasmObject() {
+abstract class Particle : WasmObject(), IParticle {
     private val handles: MutableMap<String, Handle> = mutableMapOf()
     private val toSync: MutableSet<Handle> = mutableSetOf()
     private val eventHandlers: MutableMap<String, () -> Unit> = mutableMapOf()
 
-    fun registerHandle(name: String, handle: Handle) {
+    override fun registerHandle(name: String, handle: Handle) {
         handle.name = name
         handle.particle = this
         handles[name] = handle
         log("Registering $name")
     }
 
-    fun eventHandler(name: String, handler: () -> Unit) {
+    override fun eventHandler(name: String, handler: () -> Unit) {
         eventHandlers[name] = handler
     }
 
-    fun connectHandle(handleName: String, willSync: Boolean): Handle? {
+    override fun connectHandle(handleName: String, willSync: Boolean): Handle? {
         log("Connect called internal '$handleName'")
 
         if (handles.containsKey(handleName)) {
@@ -43,16 +65,13 @@ abstract class Particle : WasmObject() {
         return null
     }
 
-    fun sync(handle: Handle) {
+    override fun sync(handle: Handle) {
         log("Particle.sync called")
         toSync.remove(handle)
         onHandleSync(handle, toSync.isEmpty())
     }
 
-    abstract fun onHandleUpdate(handle: Handle)
-    abstract fun onHandleSync(handle: Handle, allSynced: Boolean)
-
-    fun renderSlot(slotName: String, sendTemplate: Boolean = true, sendModel: Boolean = true) {
+    override fun renderSlot(slotName: String, sendTemplate: Boolean = true, sendModel: Boolean = true) {
       val template = if (sendTemplate) getTemplate(slotName) else ""
       var model = ""
       if (sendModel) {
@@ -63,7 +82,7 @@ abstract class Particle : WasmObject() {
       render(this.toWasmAddress(), slotName.toWasmString(), template.toWasmString(), model.toWasmString())
     }
 
-    fun serviceRequest(call: String, args: Map<String, String> = mapOf(), tag: String = "") {
+    override fun serviceRequest(call: String, args: Map<String, String> = mapOf(), tag: String = "") {
       val encoded = StringEncoder.encodeDictionary(args)
       serviceRequest(
         this.toWasmAddress(),
@@ -73,7 +92,7 @@ abstract class Particle : WasmObject() {
       )
     }
 
-    open fun fireEvent(slotName: String, eventName: String) {
+    override fun fireEvent(slotName: String, eventName: String) {
       eventHandlers[eventName]?.invoke()
       renderSlot(slotName)
     }
@@ -87,17 +106,23 @@ abstract class Particle : WasmObject() {
      * @param String URL with $variables
      * @return absolute URL
      */
-    fun resolveUrl(url: String): String {
+    override fun resolveUrl(url: String): String {
       val r: WasmString = resolveUrl(url.toWasmString())
       val resolved = r.toKString()
       _free(r)
       return resolved
     }
 
-    open fun init() {}
-    open fun getTemplate(slotName: String): String = ""
-    open fun populateModel(slotName: String, model: Map<String, String> = mapOf()): Map<String, String> = model
-    open fun serviceResponse(call: String, response: Map<String, String>, tag: String = "") {}
+    override fun init() {}
+    override fun getTemplate(slotName: String): String = ""
+    override fun populateModel(slotName: String, model: Map<String, String> = mapOf()): Map<String, String> = model
+    override fun serviceResponse(call: String, response: Map<String, String>, tag: String = "") {}
+
+}
+
+class WasmParticle(particle: Particle) : IParticle by particle
+{
+
 
 }
 
