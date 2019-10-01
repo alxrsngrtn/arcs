@@ -13,8 +13,6 @@ abstract class Entity<T> {
 interface IParticle {
     fun registerHandle(name: String, handle: Handle)
     fun eventHandler(name: String, handler: () -> Unit)
-    fun connectHandle(handleName: String, willSync: Boolean): Handle?
-    fun sync(handle: Handle)
     fun onHandleUpdate(handle: Handle)
     fun onHandleSync(handle: Handle, allSynced: Boolean)
 
@@ -28,13 +26,12 @@ interface IParticle {
     fun init()
     fun getTemplate(slotName: String): String
     fun populateModel(slotName: String, model: Map<String, String> = mapOf()): Map<String, String>
-
 }
 
 /**
- * Base class for all Wasm Particles.
+ * Base class for all Kotlin Particles.
  */
-abstract class Particle : WasmObject(), IParticle {
+abstract class Particle : IParticle {
     private val handles: MutableMap<String, Handle> = mutableMapOf()
     private val toSync: MutableSet<Handle> = mutableSetOf()
     private val eventHandlers: MutableMap<String, () -> Unit> = mutableMapOf()
@@ -50,7 +47,7 @@ abstract class Particle : WasmObject(), IParticle {
         eventHandlers[name] = handler
     }
 
-    override fun connectHandle(handleName: String, willSync: Boolean): Handle? {
+    fun connectHandle(handleName: String, willSync: Boolean): Handle? {
         log("Connect called internal '$handleName'")
 
         if (handles.containsKey(handleName)) {
@@ -64,20 +61,10 @@ abstract class Particle : WasmObject(), IParticle {
         return null
     }
 
-    override fun sync(handle: Handle) {
+    fun sync(handle: Handle) {
         log("Particle.sync called")
         toSync.remove(handle)
         onHandleSync(handle, toSync.isEmpty())
-    }
-
-
-    override fun renderOutput() {
-      log("renderOutput")
-      val slotName = ""
-      val template = getTemplate(slotName)
-      val dict = populateModel(slotName)
-      val model = StringEncoder.encodeDictionary(dict)
-      onRenderOutput(this.toWasmAddress(), template.toWasmString(), model.toWasmString())
     }
 
     /**
@@ -87,19 +74,38 @@ abstract class Particle : WasmObject(), IParticle {
         log("ignoring renderSlot")
     }
 
-    override fun serviceRequest(call: String, args: Map<String, String> = mapOf(), tag: String = "") {
-      val encoded = StringEncoder.encodeDictionary(args)
-      serviceRequest(
-        this.toWasmAddress(),
-        call.toWasmString(),
-        encoded.toWasmString(),
-        tag.toWasmString()
-      )
-    }
-
     override fun fireEvent(slotName: String, eventName: String) {
       eventHandlers[eventName]?.invoke()
+      // TODO(alxr): Should this call renderOutput?
       renderSlot(slotName)
+    }
+
+
+    override fun init() {}
+    override fun getTemplate(slotName: String): String = ""
+    override fun populateModel(slotName: String, model: Map<String, String>): Map<String, String> = model
+    override fun serviceResponse(call: String, response: Map<String, String>, tag: String) {}
+
+}
+
+class WasmParticle(particle: Particle) : WasmObject(), IParticle by particle {
+    override fun renderOutput() {
+        log("renderOutput")
+        val slotName = ""
+        val template = getTemplate(slotName)
+        val dict = populateModel(slotName)
+        val model = StringEncoder.encodeDictionary(dict)
+        onRenderOutput(this.toWasmAddress(), template.toWasmString(), model.toWasmString())
+    }
+
+    override fun serviceRequest(call: String, args: Map<String, String>, tag: String) {
+        val encoded = StringEncoder.encodeDictionary(args)
+        serviceRequest(
+                this.toWasmAddress(),
+                call.toWasmString(),
+                encoded.toWasmString(),
+                tag.toWasmString()
+        )
     }
 
     /**
@@ -112,23 +118,11 @@ abstract class Particle : WasmObject(), IParticle {
      * @return absolute URL
      */
     override fun resolveUrl(url: String): String {
-      val r: WasmString = resolveUrl(url.toWasmString())
-      val resolved = r.toKString()
-      _free(r)
-      return resolved
+        val r: WasmString = resolveUrl(url.toWasmString())
+        val resolved = r.toKString()
+        _free(r)
+        return resolved
     }
-
-    override fun init() {}
-    override fun getTemplate(slotName: String): String = ""
-    override fun populateModel(slotName: String, model: Map<String, String> = mapOf()): Map<String, String> = model
-    override fun serviceResponse(call: String, response: Map<String, String>, tag: String = "") {}
-
-}
-
-class WasmParticle(particle: Particle) : IParticle by particle
-{
-
-
 }
 
 abstract class Handle : WasmObject() {
