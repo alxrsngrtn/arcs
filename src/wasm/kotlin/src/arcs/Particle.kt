@@ -1,7 +1,6 @@
 package arcs
 
 import kotlin.collections.set
-import arcs.api.Particle
 
 typealias URL = String
 
@@ -19,7 +18,7 @@ interface IParticle {
     fun onHandleUpdate(handle: Handle)
     fun onHandleSync(handle: Handle, allSynced: Boolean)
 
-    fun renderSlot(slotName: String, sendTemplate: Boolean = true, sendModel: Boolean = true)
+    fun renderOutput()
     fun fireEvent(slotName: String, eventName: String)
 
     fun serviceRequest(call: String, args: Map<String, String> = mapOf(), tag: String = "")
@@ -71,15 +70,21 @@ abstract class Particle : WasmObject(), IParticle {
         onHandleSync(handle, toSync.isEmpty())
     }
 
-    override fun renderSlot(slotName: String, sendTemplate: Boolean = true, sendModel: Boolean = true) {
-      val template = if (sendTemplate) getTemplate(slotName) else ""
-      var model = ""
-      if (sendModel) {
-        val dict = populateModel(slotName)
-        model = StringEncoder.encodeDictionary(dict)
-      }
 
-      render(this.toWasmAddress(), slotName.toWasmString(), template.toWasmString(), model.toWasmString())
+    override fun renderOutput() {
+      log("renderOutput")
+      val slotName = ""
+      val template = getTemplate(slotName)
+      val dict = populateModel(slotName)
+      val model = StringEncoder.encodeDictionary(dict)
+      onRenderOutput(this.toWasmAddress(), template.toWasmString(), model.toWasmString())
+    }
+
+    /**
+      * @deprecated for contexts using UiBroker (e.g Kotlin)
+      */
+    fun renderSlot(slotName: String, sendTemplate: Boolean = true, sendModel: Boolean = true) {
+        log("ignoring renderSlot")
     }
 
     override fun serviceRequest(call: String, args: Map<String, String> = mapOf(), tag: String = "") {

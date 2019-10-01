@@ -1,6 +1,5 @@
 package arcs.api;
 
-import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -11,8 +10,10 @@ public interface Particle {
 
   String getName();
 
+  // TODO(alxr): not necessary
   void setSpec(ParticleSpec spec);
 
+  // TODO(alxr): not necessary, already here through DI
   void setJsonParser(PortableJsonParser jsonParser);
 
   void setHandles(Map<String, Handle> handleByName);
@@ -33,6 +34,9 @@ public interface Particle {
 
   void setOutput(Consumer<PortableJson> output);
 
+  /**
+   * Request to trigger rendering.
+   */
   void output();
 
   // Particle doesn't know its spec until it is instantiated. This is a helper method
