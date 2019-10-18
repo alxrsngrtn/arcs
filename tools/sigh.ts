@@ -149,7 +149,7 @@ function install(args: string[]): boolean {
   const sighDeps = require('../package.json').sighDependencies;
   args = args.map(x => (x in sighDeps) ? `${x}@${sighDeps[x]}` : x);
   const modules = [...new Set([...args, ...installed])];
-  if (!saneSpawn('npm', ['install', '--no-save', ...modules], {logCmd: true})) {
+  if (!saneSpawn('npm', ['install', '--no-save', '--no-optional', ...modules], {logCmd: true})) {
     return false;
   }
 

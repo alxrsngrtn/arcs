@@ -24,6 +24,7 @@ cache: npm
 # Thinking about adding install steps? Why not modify the tools/setup script instead?
 install:
   - ./tools/setup
+  - npm ci
 
 
 before_deploy:

@@ -82,7 +82,7 @@ status "3. Update npm to latest version"
 nvm install-latest-npm  || fail 'Failed to update npm to latest version.'
 
 status "4. Install dependencies"
-(cd $ROOT && npm ci && npm --prefix=server ci) || fail 'Failed to install dependencies.'
+(cd $ROOT && npm install --no-optional && npm --prefix=server install --no-optional) || fail 'Failed to install dependencies.'
 
 status "4.1. Install sigh dependencies"
 (cd $ROOT && ./tools/sigh install chokidar) || fail 'Failed to install sigh dependencies.'
