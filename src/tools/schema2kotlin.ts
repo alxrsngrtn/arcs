@@ -33,6 +33,8 @@ const typeMap = {
 };
 
 export class Schema2Kotlin extends Schema2Base {
+  pkgName: string;
+
   // test-KOTLIN.file_Name.arcs -> TestKotlinFileName.kt
   outputName(baseName: string): string {
     const parts = baseName.toLowerCase().replace(/\.arcs$/, '').split(/[-._]/);
@@ -41,7 +43,7 @@ export class Schema2Kotlin extends Schema2Base {
 
   fileHeader(outName: string): string {
     return `\
-package arcs
+package ${this.pkgName}
 
 //
 // GENERATED CODE -- DO NOT EDIT
@@ -52,6 +54,10 @@ package arcs
 
   getClassGenerator(node: SchemaNode): ClassGenerator {
     return new KotlinGenerator(node);
+  }
+
+  addScope(namespace: string = 'arcs') {
+    this.pkgName = namespace;
   }
 }
 
@@ -123,4 +129,5 @@ data class ${name}(
 ${typeDecls}
 `;
   }
+
 }

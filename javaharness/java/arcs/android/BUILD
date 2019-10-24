@@ -5,27 +5,26 @@ package(default_visibility = [
 
 licenses(["notice"])
 
-load("@build_bazel_rules_android//android:rules.bzl", "android_library")
+load("//tools/build_defs/android:rules.bzl", "android_library")
 
 android_library(
     name = "android",
     srcs = glob(["*.java"]),
-    javacopts = ["-Xep:AndroidJdkLibsChecker:OFF"],
-    idl_srcs = glob(["*.aidl"]),
-    idl_import_root = ".",
-    manifest = "AndroidManifest.xml",
     assets = [
-        "//shells/pipes-shell:pipes_shell_web",
+        "//third_party/javascript/arcs:pipes-shell-assets",
     ],
-    exports_manifest = 1,
     assets_dir = "pipes_shell_web_dist",
+    exports_manifest = 1,
+    idl_import_root = ".",
+    idl_srcs = glob(["*.aidl"]),
+    javacopts = ["-Xep:AndroidJdkLibsChecker:OFF"],
+    manifest = "AndroidManifest.xml",
     resource_files = glob(["res/**"]),
     deps = [
-        "//javaharness:autovalue",
         "//javaharness/java/arcs/api:api-android",
-        "@com_google_dagger",
-        "@flogger//jar",
-        "@flogger_system_backend//jar",
-        "@javax_inject_source//jar",
+        "//third_party/java/auto:auto_value",
+        "//third_party/java/dagger",
+        "//third_party/java/flogger:android",
+        "//third_party/java/jsr330_inject",
     ],
 )

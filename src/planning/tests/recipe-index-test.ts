@@ -53,8 +53,8 @@ describe('RecipeIndex', () => {
         Transform
     `), [
 `recipe
-  ? as handle0 // ~
-  ? as handle1 // ~
+  handle0: ? // ~
+  handle1: ? // ~
   Transform as particle0
     lumberjack: out handle0
     person: in handle1`
@@ -91,11 +91,11 @@ describe('RecipeIndex', () => {
         person: inout Person
 
       recipe
-        create as person
+        person: create
         A
     `), [
 `recipe
-  create as handle0 // Person {}
+  handle0: create // Person {}
   A as particle0
     person: inout handle0`
     ]);
@@ -120,7 +120,29 @@ describe('RecipeIndex', () => {
     ]);
   }));
 
-  it('resolves local slots, but not a root slot', async () => {
+  it('SLANDLES SYNTAX resolves local slots, but not a root slot', Flags.withPostSlandlesSyntax(async () => {
+    assert.sameMembers(await extractIndexRecipeStrings(`
+      particle A
+        root: consume
+          detail: provide
+      particle B
+        detail: consume
+
+      recipe
+        A
+          root: consume
+        B
+    `), [
+`recipe
+  A as particle0
+    root: consume
+      detail: provide slot0
+  B as particle1
+    detail: consume slot0`
+    ]);
+  }));
+
+  it('resolves local slots, but not a root slot', Flags.withPreSlandlesSyntax(async () => {
     assert.sameMembers(await extractIndexRecipeStrings(`
       particle A
         consume root
@@ -140,7 +162,7 @@ describe('RecipeIndex', () => {
   B as particle1
     consume detail as slot0`
     ]);
-  });
+  }));
 
   it('SLANDLES SYNTAX resolves constraints', Flags.withPostSlandlesSyntax(async () => {
     assert.sameMembers(await extractIndexRecipeStrings(`
@@ -159,9 +181,9 @@ describe('RecipeIndex', () => {
         Transform.b: out TransformAgain.b
     `), [
 `recipe
-  ? as handle0 // ~
-  create as handle1 // B {}
-  ? as handle2 // ~
+  handle0: ? // ~
+  handle1: create // B {}
+  handle2: ? // ~
   Transform as particle0
     a: in handle0
     b: out handle1
@@ -241,21 +263,21 @@ describe('RecipeIndex', () => {
       particle A
         thing: in Thing
       recipe A
-        map as thing
+        thing: map
         A
           thing: any thing
 
       particle B
         thing: out Thing
       recipe B
-        create as thing
+        thing: create
         B
           thing: any thing
 
       particle C
         thing: in Thing
       recipe C
-        use as thing
+        thing: use
         C
           thing: any thing
     `);

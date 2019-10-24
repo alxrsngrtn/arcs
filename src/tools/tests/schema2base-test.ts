@@ -19,9 +19,10 @@ import {SchemaNode} from '../schema2graph.js';
 class Schema2Mock extends Schema2Base {
   res: Dictionary<[string, string, boolean, string][]> = {};
   count: Dictionary<number> = {};
+  readonly namespaceArgs: string[] = [];
 
-  constructor(manifest: Manifest) {
-    super({'_': []});
+  constructor(manifest: Manifest, opts = {}) {
+    super({...{'_': []}, ...opts});
     this.processManifest(manifest);
   }
 
@@ -38,6 +39,11 @@ class Schema2Mock extends Schema2Base {
       }
     };
   }
+
+  addScope(namespace: string) {
+    this.namespaceArgs.push(namespace);
+  }
+
 }
 
 describe('schema2base', () => {
@@ -104,5 +110,19 @@ describe('schema2base', () => {
       'Foo_H4': [['txt', 'T', true, null], ['num', 'N', true, null], ['url', 'U', true, null]],
     });
     assert.deepStrictEqual(mock.count, {'Foo_H1': 1, 'Foo_H2': 2, 'Foo_H3': 1, 'Foo_H4': 3});
+  });
+
+  it('sets the scope / package once', async () => {
+
+    const manifest = await Manifest.parse(`\
+  particle Bar
+    in Product {Text name, Number price} order
+    out [Product {Text name, Number price}] recommendations
+    `);
+
+    const mock = new Schema2Mock(manifest, {'package': 'baz'});
+
+    assert.includeDeepOrderedMembers(mock.namespaceArgs, ['baz']);
+
   });
 });

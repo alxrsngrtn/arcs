@@ -35,6 +35,9 @@ const typeMap = {
 };
 
 export class Schema2Cpp extends Schema2Base {
+  nsTop: string;
+  nsBottom: string;
+
   // test-CPP.file_Name.arcs -> test-cpp-file-name.h
   outputName(baseName: string): string {
     return baseName.toLowerCase().replace(/\.arcs$/, '').replace(/[._]/g, '-') + '.h';
@@ -47,11 +50,19 @@ export class Schema2Cpp extends Schema2Base {
 #define ${headerGuard}
 
 // GENERATED CODE - DO NOT EDIT
+
+${this.nsTop}
 `;
   }
 
   fileFooter(): string {
-    return '\n#endif\n';
+    return `\n${this.nsBottom}\n#endif\n`;
+  }
+
+  addScope(namespace: string = 'arcs') {
+    const nss = namespace.trim().split('.');
+    this.nsTop = nss.map(n => `namespace ${n} {`).join('\n');
+    this.nsBottom = nss.reverse().map(n => `}  // namespace ${n}`).join('\n');
   }
 
   getClassGenerator(node: SchemaNode): ClassGenerator {
@@ -160,8 +171,6 @@ class CppGenerator implements ClassGenerator {
 
     return `\
 
-namespace arcs {
-
 class ${name}${bases} {
 public:
   // Entities must be copied with arcs::clone_entity(), which will exclude the internal id.
@@ -255,7 +264,6 @@ inline std::string internal::Accessor::encode_entity(const ${name}& entity) {
   return encoder.result();
 }
 
-}  // namespace arcs
 
 // For STL unordered associative containers. Entities will need to be std::move()-inserted.
 template<>

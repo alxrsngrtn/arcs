@@ -1,5 +1,9 @@
-package arcs
+package arcs.tutorials
 
+import arcs.Particle
+import arcs.WasmAddress
+import arcs.Singleton
+import arcs.JsonStoreParticle_inputData
 import kotlin.native.internal.ExportForCppRuntime
 
 /**
@@ -21,30 +25,11 @@ class JsonStoreParticle : Particle() {
     )
   }
 
-  override fun onHandleUpdate(handle: Handle) {
-    renderSlot("root")
-  }
-
-  override fun onHandleSync(handle: Handle, allSynced: Boolean) {
-    if(allSynced) {
-      log("All handles synched")
-      renderSlot("root")
+    override fun getTemplate(slotName: String): String {
+        return "<b>Hello, <span>{{name}}</span>, aged <span>{{age}}</span>!</b>"
     }
-  }
-
-  private fun console(s: String) {
-    log(s)
-  }
-
-  override fun getTemplate(slotName: String): String {
-    log("getting template")
-      return """<b>Hello, <span>{{name}}</span>, aged <span>{{age}}</span>!</b>"""
-  }
 }
 
 @Retain
 @ExportForCppRuntime("_newJsonStoreParticle")
-fun constructJsonStoreParticle(): WasmAddress {
-  log("_newJsonStoreParticle called")
-  return JsonStoreParticle().toWasmAddress()
-}
+fun constructJsonStoreParticle(): WasmAddress = JsonStoreParticle().toWasmAddress()

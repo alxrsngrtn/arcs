@@ -1,17 +1,10 @@
 # Execution requirements for running commands in the repo root.
 EXECUTION_REQUIREMENTS_TAGS = [
-    "no-sandbox",
-    "no-cache",
-    "no-remote",
     "local",
 ]
 
 # Same as the above, but as a dictionary.
 EXECUTION_REQUIREMENTS_DICT = dict([(k, "1") for k in EXECUTION_REQUIREMENTS_TAGS])
-
-def _absolute_path(repo_root, path):
-    """Converts path relative to the repo root into an absolute file path."""
-    return repo_root + "/" + path
 
 def _write_shell_script(ctx, run_script):
     """Writes out a script for running a command in the repo root.
@@ -21,17 +14,6 @@ def _write_shell_script(ctx, run_script):
     Returns the created script as a File object.
     """
 
-    # Extract the repo root directory from .bazelrc
-    if "repo_root" not in ctx.var:
-        fail(
-            "\n*****\n" +
-            "repo_root is not defined. Run the following script to add the " +
-            "right value to your .bazelrc file:\n\n" +
-            "./tools/add_repo_root.sh\n" +
-            "*****\n\n",
-        )
-    repo_root = ctx.var["repo_root"]
-
     # Collect input and output files, and compute string substitutions.
     input_files = ctx.files.srcs
     input_paths = [f.path for f in input_files]
@@ -39,13 +21,14 @@ def _write_shell_script(ctx, run_script):
     SRC = input_paths[0] if len(input_paths) == 1 else None
 
     output_files = ctx.outputs.outs
-    output_paths = [_absolute_path(repo_root, f.path) for f in output_files]
+    output_paths = [f.path for f in output_files]
     OUTS = " ".join(output_paths)
     OUT = output_paths[0] if len(output_paths) == 1 else None
 
     # Perform cmd string substitutions.
     cmd = ctx.attr.cmd
     cmd = cmd.format(SRC = SRC, SRCS = SRCS, OUT = OUT, OUTS = OUTS)
+    cmd = ctx.expand_location(cmd, ctx.attr.deps)
 
     # Write a shell script to perform the command.
     script_name = ctx.attr.name + ".sh"
@@ -54,17 +37,20 @@ def _write_shell_script(ctx, run_script):
         template = ctx.file._template,
         output = script_file,
         substitutions = {
-            "{repo_root}": repo_root,
             "{cmd}": cmd,
         },
     )
 
     # Optionally run the shell script.
     if run_script:
-        ctx.actions.run(
-            executable = script_file,
+        # Running scripts via ctx.actions.run is not supported on Windows, so
+        # we need to use ctx.actions.run_shell instead, with the script path as
+        # our only command.
+        ctx.actions.run_shell(
+            command = script_file.path,
             inputs = depset(input_files + ctx.files.deps),
             outputs = output_files,
+            tools = [script_file],
             progress_message = ctx.attr.progress_message,
             use_default_shell_env = True,
             execution_requirements = EXECUTION_REQUIREMENTS_DICT,
@@ -77,7 +63,6 @@ def _run_in_repo(ctx):
 
 def _run_in_repo_test(ctx):
     script_file = _write_shell_script(ctx = ctx, run_script = False)
-
     return [DefaultInfo(
         executable = script_file,
         runfiles = ctx.runfiles(files = ctx.files.srcs + ctx.files.deps),

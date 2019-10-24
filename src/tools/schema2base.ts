@@ -20,8 +20,11 @@ export interface ClassGenerator {
 }
 
 export abstract class Schema2Base {
+  private readonly scope: string;
+
   constructor(readonly opts: minimist.ParsedArgs) {
     Utils.init('../..');
+    this.scope = opts.package;
   }
 
   async call() {
@@ -42,6 +45,9 @@ export abstract class Schema2Base {
     if (this.opts.update && fs.existsSync(outPath) && fs.statSync(outPath).mtimeMs > fs.statSync(src).mtimeMs) {
       return;
     }
+
+    // Try to get one of the following keys from the manifest metadata
+    this.addScope(this.scope);
 
     const manifest = await Utils.parse(`import '${src}'`);
     const classes = this.processManifest(manifest);
@@ -126,4 +132,6 @@ export abstract class Schema2Base {
   fileFooter(): string { return ''; }
 
   abstract getClassGenerator(node: SchemaNode): ClassGenerator;
+
+  addScope(namespace: string) {};
 }

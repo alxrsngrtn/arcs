@@ -13,8 +13,8 @@ package arcs.crdt
 
 import arcs.crdt.CrdtSingleton.Operation.Clear
 import arcs.crdt.CrdtSingleton.Operation.Update
-import arcs.crdt.internal.Referencable
-import arcs.crdt.internal.ReferenceId
+import arcs.common.Referencable
+import arcs.common.ReferenceId
 import arcs.crdt.internal.VersionMap
 import com.google.common.truth.Truth.assertThat
 import org.junit.Before
@@ -122,11 +122,11 @@ class CrdtSingletonTest {
     val result = alice.merge(bob.data)
     val aliceModel = requireNotNull(
       result.modelChange
-        as? CrdtChange.Data<CrdtSet.Data<Reference>, CrdtSingleton.Operation<Reference>>
+        as? CrdtChange.Data<CrdtSingleton.Data<Reference>, CrdtSingleton.Operation<Reference>>
     )
     val bobModel = requireNotNull(
       result.otherChange
-        as? CrdtChange.Data<CrdtSet.Data<Reference>, CrdtSingleton.Operation<Reference>>
+        as? CrdtChange.Data<CrdtSingleton.Data<Reference>, CrdtSingleton.Operation<Reference>>
     )
     val expectedVersion = VersionMap("alice" to 1, "bob" to 1)
     val expectedValues = mapOf(

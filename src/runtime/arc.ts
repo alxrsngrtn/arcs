@@ -264,7 +264,7 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
     switch (key.protocol) {
       case 'firebase':
       case 'pouchdb':
-        context.handles += context.handles += store.toManifestString({handleTags, overrides: {name}}) + '\n';
+        context.handles += store.toManifestString({handleTags, overrides: {name}}) + '\n';
         break;
       case 'volatile': {
         // TODO(sjmiles): emit empty data for stores marked `volatile`: shell will supply data
@@ -631,7 +631,6 @@ ${this.activeRecipe.toString()}`;
           const copiedStoreRef = this.context.findStoreById(recipeHandle.id);
           const copiedActiveStore = await copiedStoreRef.activate();
           assert(copiedActiveStore, `Cannot find store ${recipeHandle.id}`);
-          assert(copiedStoreRef.version !== null, `Copied store ${recipeHandle.id} doesn't have version.`);
           const activeStore = await newStore.activate();
           await activeStore.cloneFrom(copiedActiveStore);
           this._tagStore(newStore, this.context.findStoreTags(copiedStoreRef));
@@ -855,10 +854,10 @@ ${this.activeRecipe.toString()}`;
   getVersionByStore({includeArc=true, includeContext=false}) {
     const versionById = {};
     if (includeArc) {
-      this.storesById.forEach((handle, id) => versionById[id] = handle.version);
+      this.storesById.forEach((handle, id) => versionById[id] = handle.versionToken);
     }
     if (includeContext) {
-      this._context.allStores.forEach(handle => versionById[handle.id] = handle.version);
+      this._context.allStores.forEach(handle => versionById[handle.id] = handle.versionToken);
     }
     return versionById;
   }
