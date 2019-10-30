@@ -176,7 +176,7 @@ export class SlotConnection implements Comparable<SlotConnection> {
 
   toString(nameMap: Map<RecipeComponent, string>, options: ToStringOptions): string {
     const consumeRes: string[] = [];
-    if (Flags.usePreSlandlesSyntax) {
+    if (Flags.defaultToPreSlandlesSyntax) {
       consumeRes.push('consume');
       consumeRes.push(`${this.name}`);
       if (this.targetSlot) {
@@ -186,7 +186,7 @@ export class SlotConnection implements Comparable<SlotConnection> {
       }
     } else {
       consumeRes.push(`${this.name}:`);
-      consumeRes.push('consume');
+      consumeRes.push('consumes');
       if (this.targetSlot) {
         consumeRes.push(`${
             (nameMap && nameMap.get(this.targetSlot)) ||
@@ -213,13 +213,13 @@ export class SlotConnection implements Comparable<SlotConnection> {
         assert(providedSlotSpec, `Cannot find providedSlotSpec for ${psName}`);
       }
 
-      if (Flags.usePreSlandlesSyntax) {
+      if (Flags.defaultToPreSlandlesSyntax) {
         provideRes.push('  provide');
         provideRes.push(`${psName}`);
         provideRes.push(`as ${(nameMap && nameMap.get(providedSlot)) || providedSlot}`);
       } else {
         provideRes.push(`  ${psName}:`);
-        provideRes.push('provide');
+        provideRes.push('provides');
         provideRes.push(`${(nameMap && nameMap.get(providedSlot)) || providedSlot}`);
       }
 
