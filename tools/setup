@@ -60,7 +60,7 @@ BAZEL_SCRIPT_NAME=$(basename "$BAZEL_DEP")
 status "0. Pre-requisites"
 if [ "$OS_NAME" = "linux" ]; then
   status "0.1 Installing pre-requisites for Bazel"
-  sudo apt-get install pkg-config zip g++ zlib1g-dev unzip python3
+  sudo apt-get install pkg-config zip g++ zlib1g-dev unzip python3 openjdk-8-jdk
 elif [ "$OS_NAME" = "osx" ]; then
   status "0.1. Checking for Command Line Tools"
   xcode-select --version || xcode-select --install || fail "Unable to install Command Line Tools"
