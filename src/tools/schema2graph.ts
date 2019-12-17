@@ -9,27 +9,32 @@
  */
 import {Schema} from '../runtime/schema.js';
 import {ParticleSpec} from '../runtime/particle-spec.js';
-import {Dictionary} from '../runtime/hot.js';
 
 export class SchemaNode {
   schema: Schema;
 
-  // If this schema is only found once, name is of the form 'Particle_Handle' and aliases
-  // is empty. Otherwise, name is of the form 'ParticleInternal#' and aliases lists the
-  // 'Particle_Handle' names that need to be type aliased to it.
+  /**
+   * If this schema is only found once, name is of the form 'Particle_Handle' and aliases
+   * is empty. Otherwise, name is of the form 'ParticleInternal#' and aliases lists the
+   * 'Particle_Handle' names that need to be type aliased to it.
+   */
   name: string;
   aliases: string[] = [];
 
-  // All schemas that can be sliced to this one.
+  /** All schemas that can be sliced to this one. */
   descendants = new Set<SchemaNode>();
 
-  // Immediate descendants and ancestors. Initially null as state indicators during the two
-  // build phases, but will be set to empty arrays if no parents or children are present.
+  /**
+   * Immediate descendants and ancestors. Initially null as state indicators during the two
+   * build phases, but will be set to empty arrays if no parents or children are present.
+   */
   parents: SchemaNode[] = null;
   children: SchemaNode[] = null;
 
-  // Maps reference fields to the node for their contained schema. This is also used to
-  // ensure that nested schemas are generated before the references that rely on them.
+  /**
+   * Maps reference fields to the node for their contained schema. This is also used to
+   * ensure that nested schemas are generated before the references that rely on them.
+   */
   refs = new Map<string, SchemaNode>();
 
   constructor(schema: Schema, name: string) {
@@ -38,14 +43,16 @@ export class SchemaNode {
   }
 }
 
-// Builds a directed type lattice graph from the set of schemas defined in a particle's connections,
-// including schemas nested in references, with one node per unique schema found. The graph's edges
-// indicate "slicability", such that a child node's schema can be sliced to any of its parents.
-// For example, the schema '* {Text t, URL u}' is slicable to both '* {Text t}' and '* {URL u}'.
-//
-// The graph has a second set of edges via the refs field, which connects nodes whose schemas have
-// references to other nodes which hold those references' nested schemas. These are used to ensure
-// classes are generated in the order needed to satisfy their reference field type definitions.
+/**
+ * Builds a directed type lattice graph from the set of schemas defined in a particle's connections,
+ * including schemas nested in references, with one node per unique schema found. The graph's edges
+ * indicate "slicability", such that a child node's schema can be sliced to any of its parents.
+ * For example, the schema '* {Text t, URL u}' is slicable to both '* {Text t}' and '* {URL u}'.
+ *
+ * The graph has a second set of edges via the refs field, which connects nodes whose schemas have
+ * references to other nodes which hold those references' nested schemas. These are used to ensure
+ * classes are generated in the order needed to satisfy their reference field type definitions.
+ */
 export class SchemaGraph {
   nodes: SchemaNode[] = [];
   startNodes: SchemaNode[];
@@ -142,9 +149,11 @@ export class SchemaGraph {
     return s[0].toUpperCase() + s.slice(1);
   }
 
-  // Traverses the graph to yield schemas in the order in which they should be generated.
-  // The traversal is primarily breadth-first, but some nodes may be pushed back due to
-  // unsatisfied constraints.
+  /**
+   * Traverses the graph to yield schemas in the order in which they should be generated.
+   * The traversal is primarily breadth-first, but some nodes may be pushed back due to
+   * unsatisfied constraints.
+   */
   * walk(): IterableIterator<SchemaNode> {
     const queue: SchemaNode[] = [...this.startNodes];
     const seen = new Set<SchemaNode>();
