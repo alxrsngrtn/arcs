@@ -8,13 +8,10 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {ParticleExecutionContext} from './particle-execution-context.js';
 import {Dictionary} from './hot.js';
 import {CRDTEntity, SingletonEntityModel, CollectionEntityModel} from './crdt/crdt-entity.js';
 import {Referenceable} from './crdt/crdt-collection.js';
 import {CRDTSingleton} from './crdt/crdt-singleton.js';
-import {Flags} from './flags.js';
-import {Refinement} from './manifest-ast-nodes.js';
 
 const expressionString = (expr) : string => {
   if (expr.kind === 'binary-expression-node') {
@@ -41,12 +38,16 @@ export class Schema {
   readonly fields: Dictionary<any>;
   description: Dictionary<string> = {};
   isAlias: boolean;
-  // The implementation of fromLiteral creates a cyclic dependency, so it is
-  // separated out. This variable serves the purpose of an abstract static.
+  /**
+   * The implementation of fromLiteral creates a cyclic dependency, so it is
+   * separated out. This variable serves the purpose of an abstract static.
+   */
   static fromLiteral: SchemaMethod = null;
 
-  // For convenience, primitive field types can be specified as {name: 'Type'}
-  // in `fields`; the constructor will convert these to the correct schema form.
+  /**
+   * For convenience, primitive field types can be specified as {name: 'Type'}
+   * in `fields`; the constructor will convert these to the correct schema form.
+   */
   // tslint:disable-next-line: no-any
   constructor(names: string[], fields: Dictionary<any>, description?) {
     this.names = names;
