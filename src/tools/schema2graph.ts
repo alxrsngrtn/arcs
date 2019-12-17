@@ -47,7 +47,7 @@ export class SchemaNode {
  * Builds a directed type lattice graph from the set of schemas defined in a particle's connections,
  * including schemas nested in references, with one node per unique schema found. The graph's edges
  * indicate "slicability", such that a child node's schema can be sliced to any of its parents.
- * For example, the schema '* {Text t, URL u}' is slicable to both '* {Text t}' and '* {URL u}'.
+ * For example, the schema `* {Text t, URL u}` is slicable to both `* {Text t}` and `* {URL u}`.
  *
  * The graph has a second set of edges via the refs field, which connects nodes whose schemas have
  * references to other nodes which hold those references' nested schemas. These are used to ensure
