@@ -10,13 +10,12 @@
 
 import {assert} from '../platform/assert-web.js';
 import {Modality} from './modality.js';
-import {Direction, ParticleClaimStatement, ParticleCheckStatement} from './manifest-ast-nodes.js';
+import {Direction, SlotDirection, ParticleClaimStatement, ParticleCheckStatement} from './manifest-ast-nodes.js';
 import {TypeChecker} from './recipe/type-checker.js';
-import {TypeVariableInfo} from './type-variable-info.js';
-import {Schema} from './schema.js';
-import {InterfaceType, CollectionType, SlotType, Type, TypeLiteral} from './type.js';
+import {Schema, refinementString} from './schema.js';
+import {InterfaceType, CollectionType, SlotType, Type, TypeLiteral, TypeVariableInfo} from './type.js';
 import {Literal} from './hot.js';
-import {Check, createCheck} from './particle-check.js';
+import {Check, HandleConnectionSpecInterface, ConsumeSlotConnectionSpecInterface, ProvideSlotConnectionSpecInterface, createCheck} from './particle-check.js';
 import {ParticleClaim, Claim, createParticleClaim} from './particle-claim.js';
 import {Flags} from './flags.js';
 import * as AstNode from './manifest-ast-nodes.js';
@@ -64,8 +63,9 @@ export function isRoot({name, tags, id, type, fate}: {name: string, tags: string
   return rootNames.includes(name) || tags.some(tag => rootNames.includes(tag));
 }
 
-export class HandleConnectionSpec {
-  rawData: SerializedHandleConnectionSpec;
+export class HandleConnectionSpec implements HandleConnectionSpecInterface {
+  private rawData: SerializedHandleConnectionSpec;
+  discriminator: 'HCS';
   direction: Direction;
   name: string;
   type: Type;
@@ -78,6 +78,7 @@ export class HandleConnectionSpec {
   check?: Check;
 
   constructor(rawData: SerializedHandleConnectionSpec, typeVarMap: Map<string, Type>) {
+    this.discriminator = 'HCS';
     this.rawData = rawData;
     this.direction = rawData.direction;
     this.name = rawData.name;
@@ -95,7 +96,7 @@ export class HandleConnectionSpec {
     }
   }
 
-  toSlotConnectionSpec(): ConsumeSlotConnectionSpec {
+  toSlotConnectionSpec(): ConsumeSlotConnectionSpecInterface {
     // TODO: Remove in SLANDLESv2
     const slotType = this.type.slandleType();
     if (!slotType) {
@@ -106,6 +107,7 @@ export class HandleConnectionSpec {
     const slotInfo = slotType.getSlot();
 
     return {
+      discriminator: 'CSCS',
       name: this.name,
       isOptional: this.isOptional,
       direction: this.direction,
@@ -124,12 +126,12 @@ export class HandleConnectionSpec {
   get isInput() {
     // TODO: we probably don't really want host to be here.
     // TODO: do we want to consider any here?
-    return this.direction === 'in' || this.direction === 'inout' || this.direction === 'host';
+    return this.direction === 'reads' || this.direction === 'reads writes' || this.direction === 'hosts';
   }
 
   get isOutput() {
     // TODO: do we want to consider any here?
-    return this.direction === 'out' || this.direction === 'inout';
+    return this.direction === 'writes' || this.direction === 'reads writes';
   }
 
   isCompatibleType(type: Type) {
@@ -148,7 +150,8 @@ type SerializedSlotConnectionSpec = {
   check?: Check,
 };
 
-export class ConsumeSlotConnectionSpec {
+export class ConsumeSlotConnectionSpec implements ConsumeSlotConnectionSpecInterface {
+  discriminator: 'CSCS';
   name: string;
   isRequired: boolean;
   isSet: boolean;
@@ -158,6 +161,7 @@ export class ConsumeSlotConnectionSpec {
   provideSlotConnections: ProvideSlotConnectionSpec[];
 
   constructor(slotModel: SerializedSlotConnectionSpec) {
+    this.discriminator = 'CSCS';
     this.name = slotModel.name;
     this.isRequired = slotModel.isRequired || false;
     this.isSet = slotModel.isSet || false;
@@ -175,7 +179,7 @@ export class ConsumeSlotConnectionSpec {
 
   // Getters to 'fake' being a Handle.
   get isOptional(): boolean { return !this.isRequired; }
-  get direction(): string { return '`consume'; }
+  get direction(): string { return '`consumes'; }
   get type(): Type {
     //TODO(jopra): FIXME make the null handle optional.
     const slotT = SlotType.make(this.formFactor, null);
@@ -187,8 +191,9 @@ export class ConsumeSlotConnectionSpec {
   get dependentConnections(): ProvideSlotConnectionSpec[] { return this.provideSlotConnections; }
 }
 
-export class ProvideSlotConnectionSpec extends ConsumeSlotConnectionSpec {
+export class ProvideSlotConnectionSpec extends ConsumeSlotConnectionSpec implements ProvideSlotConnectionSpecInterface {
   check?: Check;
+  discriminator: 'CSCS';
 
   constructor(slotModel: SerializedSlotConnectionSpec) {
     super(slotModel);
@@ -398,14 +403,11 @@ export class ParticleSpec {
     }
     results.push(line);
     const indent = '  ';
+
     const writeConnection = (connection, indent) => {
       const tags = connection.tags.map((tag) => ` #${tag}`).join('');
-      if (Flags.defaultToPreSlandlesSyntax) {
-        // TODO: Remove post slandles syntax
-        results.push(`${indent}${connection.direction}${connection.isOptional ? '?' : ''} ${connection.type.toString()} ${connection.name}${tags}`);
-      } else {
-        results.push(`${indent}${connection.name}: ${AstNode.preSlandlesDirectionToDirection(connection.direction, connection.isOptional)} ${connection.type.toString()}${tags}`);
-      }
+      const dir = connection.direction === 'any' ? '' : `${AstNode.preSlandlesDirectionToDirection(connection.direction, connection.isOptional)} `;
+      results.push(`${indent}${connection.name}: ${dir}${connection.type.toString()}${refinementString(connection.type)}${tags}`);
       for (const dependent of connection.dependentConnections) {
         writeConnection(dependent, indent + '  ');
       }
@@ -422,58 +424,37 @@ export class ParticleSpec {
     this.trustChecks.forEach(check => results.push(`  ${check.toManifestString()}`));
 
     this.modality.names.forEach(a => results.push(`  modality ${a}`));
-    const slotToString = (s: SerializedSlotConnectionSpec | ProvideSlotConnectionSpec, direction: string, indent: string):void => {
+    const slotToString = (s: SerializedSlotConnectionSpec | ProvideSlotConnectionSpec, direction: SlotDirection, indent: string):void => {
       const tokens: string[] = [];
-      if (Flags.defaultToPreSlandlesSyntax) {
-        if (s.isRequired) {
-          tokens.push('must');
-        }
-        tokens.push(direction);
-        if (s.isSet) {
-          tokens.push('set of');
-        }
-        tokens.push(s.name);
-        if (s.tags.length > 0) {
-          tokens.push(s.tags.map(a => `#${a}`).join(' '));
-        }
-        results.push(`${indent}${tokens.join(' ')}`);
-        if (s.formFactor) {
-          results.push(`${indent}  formFactor ${s.formFactor}`);
-        }
-        for (const handle of s.handles) {
-          results.push(`${indent}  handle ${handle}`);
-        }
-      } else {
-        tokens.push(`${s.name}:`);
-        tokens.push(`${direction}s${s.isRequired ? '' : '?'}`);
+      tokens.push(`${s.name}:`);
+      tokens.push(`${direction}${s.isRequired ? '' : '?'}`);
 
-        const fieldSet = [];
-        // TODO(jopra): Move the formFactor and handle to the slot type information.
-        if (s.formFactor) {
-          fieldSet.push(`formFactor: ${s.formFactor}`);
-        }
-        for (const handle of s.handles) {
-          fieldSet.push(`handle: ${handle}`);
-        }
-        const fields = (fieldSet.length !== 0) ? ` {${fieldSet.join(', ')}}` : '';
-        if (s.isSet) {
-          tokens.push(`[Slot${fields}]`);
-        } else {
-          tokens.push(`Slot${fields}`);
-        }
-        if (s.tags.length > 0) {
-          tokens.push(s.tags.map(a => `#${a}`).join(' '));
-        }
-        results.push(`${indent}${tokens.join(' ')}`);
+      const fieldSet = [];
+      // TODO(jopra): Move the formFactor and handle to the slot type information.
+      if (s.formFactor) {
+        fieldSet.push(`formFactor: ${s.formFactor}`);
       }
+      for (const handle of s.handles) {
+        fieldSet.push(`handle: ${handle}`);
+      }
+      const fields = (fieldSet.length !== 0) ? ` {${fieldSet.join(', ')}}` : '';
+      if (s.isSet) {
+        tokens.push(`[Slot${fields}]`);
+      } else {
+        tokens.push(`Slot${fields}`);
+      }
+      if (s.tags.length > 0) {
+        tokens.push(s.tags.map(a => `#${a}`).join(' '));
+      }
+      results.push(`${indent}${tokens.join(' ')}`);
       if (s.provideSlotConnections) {
         // Provided slots.
-        s.provideSlotConnections.forEach(p => slotToString(p, 'provide', indent+'  '));
+        s.provideSlotConnections.forEach(p => slotToString(p, 'provides', indent+'  '));
       }
     };
 
     this.slotConnections.forEach(
-      s => slotToString(s, 'consume', '  ')
+      s => slotToString(s, 'consumes', '  ')
     );
     // Description
     if (this.pattern) {
@@ -525,9 +506,9 @@ export class ParticleSpec {
             if (!handle) {
               throw new Error(`Can't make a check on unknown handle ${handleName}.`);
             }
-            if (handle.direction === '`consume' || handle.direction === '`provide') {
+            if (handle.direction === '`consumes' || handle.direction === '`provides') {
               // Do slandles versions of slots checks and claims.
-              if (handle.direction === '`consume') {
+              if (handle.direction === '`consumes') {
                   throw new Error(`Can't make a check on handle ${handleName}. Can only make checks on input and provided handles.`);
 
               }

@@ -18,7 +18,6 @@ import {Relevance} from './relevance.js';
 import {SlotProxy} from './slot-proxy.js';
 import {Content} from './slot-consumer.js';
 import {Entity, EntityRawData, MutableEntityData} from './entity.js';
-import {PreEntityMutationHandle} from './storageNG/handle.js';
 
 export interface Capabilities {
   constructInnerArc?: (particle: Particle) => Promise<InnerArcHandle>;
@@ -46,6 +45,7 @@ export class Particle {
 
   protected slotProxiesByName: Map<string, SlotProxy> = new Map();
   private capabilities: Capabilities;
+  protected onError: Consumer<Error>;
 
   constructor() {
     // Typescript only sees this.constructor as a Function type.
@@ -90,6 +90,7 @@ export class Particle {
     this.handles = handles;
     await this.invokeSafely(async p => p.setHandles(handles), onException);
     this._handlesToSync = this._countInputHandles(handles);
+    this.onError = onException;
     if (!this._handlesToSync) {
       // onHandleSync is called IFF there are input handles, otherwise we are ready now
       this.ready();
@@ -143,7 +144,7 @@ export class Particle {
   }
 
   /**
-   * Called for handles that are configued with notifyUpdate, when change events are received from
+   * Called for handles that are configured with notifyUpdate, when change events are received from
    * the backing store. For handles also configured with keepSynced these events will be correctly
    * ordered, with some potential skips if a desync occurs. For handles not configured with
    * keepSynced, all change events will be passed through as they are received.

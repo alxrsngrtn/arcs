@@ -1,0 +1,22 @@
+directories:
+  java
+  javatests
+  build_defs
+  tools
+  third_party
+  particles
+  src
+  javaharness/java
+  javaharness/javatests
+
+targets:
+  //java/...
+  //javatests/...
+
+test_sources:
+  javatests/
+
+java_language_level: 8
+
+build_flags:
+  --incompatible_depset_is_not_iterable=false

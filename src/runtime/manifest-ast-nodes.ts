@@ -9,6 +9,7 @@
  */
 import {ClaimType} from './particle-claim.js';
 import {CheckType} from './particle-check.js';
+import {type} from 'os';
 
 /**
  * Complete set of tokens used by `manifest-parser.peg`. To use this you
@@ -41,6 +42,10 @@ export interface SourceLocation {
 export class BaseNode {
   kind: string;
   location: SourceLocation;
+}
+
+export class BaseNodeWithRefinement extends BaseNode {
+    refinement?: Refinement;
 }
 
 //  PARTICLE TYPES
@@ -495,32 +500,54 @@ export interface SchemaField extends BaseNode {
 export type SchemaType = SchemaReferenceType|SchemaCollectionType|
     SchemaPrimitiveType|SchemaUnionType|SchemaTupleType;
 
-export interface SchemaPrimitiveType extends BaseNode {
+export interface SchemaPrimitiveType extends BaseNodeWithRefinement {
   kind: 'schema-primitive';
   type: 'Text'|'URL'|'Number'|'Boolean'|'Bytes'|'Object';
 }
 
-export interface SchemaCollectionType extends BaseNode {
+export interface SchemaCollectionType extends BaseNodeWithRefinement {
   kind: 'schema-collection';
   schema: SchemaType;
 }
 
-export interface SchemaReferenceType extends BaseNode {
+export interface SchemaReferenceType extends BaseNodeWithRefinement {
   kind: 'schema-reference';
   schema: SchemaType;
 }
 
-export interface SchemaUnionType extends BaseNode {
+export interface SchemaUnionType extends BaseNodeWithRefinement {
   kind: 'schema-union';
   types: string[];
 }
 
-export interface SchemaTupleType extends BaseNode {
+export interface SchemaTupleType extends BaseNodeWithRefinement {
   kind: 'schema-tuple';
   types: string[];
 }
 
-export interface SchemaInline extends BaseNode {
+export interface Refinement extends BaseNode {
+  kind: 'refinement';
+  expression: RefinementExpression;
+}
+
+export type RefinementExpression = BinaryExpressionNode | UnaryExpressionNode | fieldName | number;
+
+export interface ExpressionNode extends BaseNode {
+  operator: string;
+}
+
+export interface BinaryExpressionNode extends ExpressionNode {
+  kind: 'binary-expression-node';
+  leftExpr: RefinementExpression;
+  rightExpr: RefinementExpression;
+}
+
+export interface UnaryExpressionNode extends ExpressionNode {
+  kind: 'unary-expression-node';
+  expr: RefinementExpression;
+}
+
+export interface SchemaInline extends BaseNodeWithRefinement {
   kind: 'schema-inline';
   names: string[];
   fields: SchemaInlineField[];
@@ -560,7 +587,7 @@ export type InterfaceItem = Interface | InterfaceArgument | InterfaceSlot;
 export interface InterfaceArgument extends BaseNode {
   kind: 'interface-argument';
   direction: Direction;
-  type: string;
+  type: ParticleHandleConnectionType;
   name: string;
 }
 
@@ -639,30 +666,24 @@ export type eol = string;
 
 // String-based enums.
 // TODO: convert to actual enums so that they can be iterated over.
-export type Direction = 'in' | 'out' | 'inout' | 'host' | '`consume' | '`provide' | 'any';
-export type DirectionUnified = 'reads' | 'writes' | 'reads writes' | 'hosts' | '`consumes' | '`provides' | 'any';
-
-// Temporary move of DirectionArrow type definition and conversions so allow
-// DirectionArrow to be removed from the runtime.
-// TODO(jopra): Remove after syntax unification.
-export type DirectionArrow = '<-' | '->' | '<->' | '`consume' | '`provide' | '=';
+export type Direction = 'reads' | 'writes' | 'reads writes' | 'hosts' | '`consumes' | '`provides' | 'any';
 
 export function preSlandlesDirectionToDirection(direction: Direction, isOptional: boolean = false): string {
   // TODO(jopra): Remove after syntax unification.
   // Use switch for totality checking.
   const opt: string = isOptional ? '?' : '';
   switch (direction) {
-    case 'in':
+    case 'reads':
       return `reads${opt}`;
-    case 'out':
+    case 'writes':
       return `writes${opt}`;
-    case 'inout':
+    case 'reads writes':
       return `reads${opt} writes${opt}`;
-    case '`consume':
+    case '`consumes':
       return `\`consumes${opt}`;
-    case '`provide':
+    case '`provides':
       return `\`provides${opt}`;
-    case 'host':
+    case 'hosts':
       return `hosts${opt}`;
     case 'any':
       return `any${opt}`;
@@ -672,75 +693,7 @@ export function preSlandlesDirectionToDirection(direction: Direction, isOptional
   }
 }
 
-export function directionToPreSlandlesDirection(direction: DirectionUnified): Direction {
-  // TODO(jopra): Remove after syntax unification.
-  // Use switch for totality checking.
-  switch (direction) {
-    case 'reads':
-      return 'in';
-    case 'writes':
-      return 'out';
-    case 'reads writes':
-      return 'inout';
-    case '`consumes':
-      return '`consume';
-    case '`provides':
-      return '`provide';
-    case 'hosts':
-      return 'host';
-    case 'any':
-      return 'any';
-    default:
-      // Catch nulls and unsafe values from javascript.
-      throw new Error(`Bad direction ${direction}`);
-  }
-}
-
-export function arrowToDirection(arrow: DirectionArrow): Direction {
-  // TODO(jopra): Remove after syntax unification.
-  // Use switch for totality checking.
-  switch (arrow) {
-    case '->':
-      return 'out';
-    case '<-':
-      return 'in';
-    case '<->':
-      return 'inout';
-    case '`consume':
-      return '`consume';
-    case '`provide':
-      return '`provide';
-    case '=':
-      return 'any';
-    default:
-      // Catch nulls and unsafe values from javascript.
-      throw new Error(`Bad arrow ${arrow}`);
-  }
-}
-
-export function directionToArrow(dir: Direction): DirectionArrow {
-  // TODO(jopra): Remove after syntax unification.
-  switch (dir) {
-    case 'in':
-      return '<-';
-    case 'out':
-      return '->';
-    case 'inout':
-      return '<->';
-    case 'host':
-      return '=';
-    case '`consume':
-      return '`consume';
-    case '`provide':
-      return '`provide';
-    case 'any':
-      return '=';
-    default:
-      throw new Error(`Unexpected direction ${dir}`);
-  }
-}
-
-export type SlotDirection = 'provide' | 'consume';
+export type SlotDirection = 'provides' | 'consumes';
 export type Fate = 'use' | 'create' | 'map' | 'copy' | '?' | '`slot';
 
 export type ParticleHandleConnectionType = TypeVariable|CollectionType|

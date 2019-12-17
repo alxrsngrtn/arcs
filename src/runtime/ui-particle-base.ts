@@ -11,6 +11,8 @@
 import {Entity, EntityClass} from './entity.js';
 import {Handle, Collection, Singleton} from './handle.js';
 import {Particle} from './particle.js';
+import {CollectionHandle, SingletonHandle} from './storageNG/handle.js';
+import {Consumer} from './hot.js';
 
 export interface UiParticleConfig {
   handleNames: string[];
@@ -97,7 +99,7 @@ export class UiParticleBase extends Particle {
    */
   // tslint:disable-next-line: no-any
   async await(task: (p: this) => Promise<any>) {
-    return await this.invokeSafely(task, err => { throw err; });
+    return await this.invokeSafely(task, this.onError);
   }
 
   /**
@@ -105,7 +107,7 @@ export class UiParticleBase extends Particle {
    */
   async set(handleName: string, value: Entity | {}): Promise<void> {
     const handle = this._requireHandle(handleName);
-    if (!(handle instanceof Singleton)) {
+    if (!(handle instanceof Singleton) && !(handle instanceof SingletonHandle)) {
       throw new Error(`Cannot set non-Singleton handle [${handleName}]`);
     }
     if (Array.isArray(value)) {
@@ -119,7 +121,7 @@ export class UiParticleBase extends Particle {
    */
   async add(handleName: string, value: Entity | {} | [Entity] | [{}]): Promise<void> {
     const handle = this._requireHandle(handleName);
-    if (!(handle instanceof Collection)) {
+    if (!(handle instanceof Collection) && !(handle instanceof CollectionHandle)) {
       throw new Error(`Cannot add to non-Collection handle [${handleName}]`);
     }
     const entityClass = handle.entityClass;
@@ -128,13 +130,15 @@ export class UiParticleBase extends Particle {
       // remove pre-existing Entities (we will then re-add them, which is the mutation cycle)
       await this._remove(handle, data);
       // add (store) Entities, or Entities created from values
-      await Promise.all(data.map(
-        value => handle.store(this._requireEntity(value, entityClass))
-      ));
+      if (handle instanceof CollectionHandle) {
+        await handle.addMultiple(data);
+      } else {
+        await Promise.all(data.map(value => handle.store(this._requireEntity(value, entityClass))));
+      }
     });
   }
 
-  private _requireEntity(value: Entity | {}, entityClass: EntityClass): Entity {
+  private _requireEntity(value: Entity | {}, entityClass: EntityClass, id?: string): Entity {
     return (value instanceof Entity) ? value : new (entityClass)(value);
   }
 
@@ -143,16 +147,17 @@ export class UiParticleBase extends Particle {
    */
   async remove(handleName: string, value: Entity | [Entity]): Promise<void> {
     const handle = this._requireHandle(handleName);
-    if (!(handle instanceof Collection)) {
+    if (!(handle instanceof Collection) && !(handle instanceof CollectionHandle)) {
       throw new Error(`Cannot remove from a non-Collection handle [${handleName}]`);
     }
     return this._remove(handle, value);
   }
-  private async _remove(handle: Collection, value: Entity | {} | [Entity] | [{}]): Promise<void> {
+  // tslint:disable-next-line: no-any
+  private async _remove(handle: Collection|CollectionHandle<any>, value: Entity | {} | [Entity] | [{}]): Promise<void> {
     const data = Array.isArray(value) ? value : [value];
     return this.await(async p => Promise.all(
       data.map(async value => {
-        if (value instanceof Entity) {
+        if (value instanceof Entity && Entity.isIdentified(value)) {
           await handle.remove(value);
         }
       }
@@ -164,7 +169,8 @@ export class UiParticleBase extends Particle {
    */
   async clear(handleName: string): Promise<void> {
     const handle = this._requireHandle(handleName);
-    if (!(handle instanceof Singleton) && !(handle instanceof Collection)) {
+    if (!(handle instanceof Singleton) && !(handle instanceof Collection) &&
+        !(handle instanceof SingletonHandle) && !(handle instanceof CollectionHandle)) {
       throw new Error('Can only clear Singleton or Collection handles');
     }
     return this.await(p => handle.clear());

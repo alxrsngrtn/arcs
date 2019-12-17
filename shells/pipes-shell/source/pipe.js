@@ -11,12 +11,12 @@
 import {logsFactory} from '../../../build/platform/logs-factory.js';
 import {Runtime} from '../../../build/runtime/runtime.js';
 import {UiSlotComposer} from '../../../build/runtime/ui-slot-composer.js';
-import {Utils} from '../../lib/utils.js';
 import {pec} from './verbs/pec.js';
 import {runArc, stopArc, uiEvent} from './verbs/run-arc.js';
 import {event} from './verbs/event.js';
 import {spawn} from './verbs/spawn.js';
 import {ingest} from './verbs/ingest.js';
+import {parse} from './verbs/parse.js';
 import {instantiateRecipeByName} from './lib/utils.js';
 import {requireContext} from './context.js';
 import {dispatcher} from './dispatcher.js';
@@ -35,13 +35,11 @@ export const busReady = async (bus, {manifest}) => {
 };
 
 const configureRuntime = async ({rootPath, urlMap, storage, manifest}, bus) => {
-  // configure arcs environment
-  Utils.init(rootPath, urlMap);
-  // marshal context
+  // configure arcs runtime environment
+  Runtime.init(rootPath, urlMap);
+  // marshal and bind context
   const context = await requireContext(manifest || config.manifest);
-  // configure Runtime
-  const runtime = new Runtime(Utils.env.loader, UiSlotComposer, context);
-  runtime.pecFactory = Utils.env.pecFactory;
+  Runtime.getRuntime().bindContext(context);
   // attach verb-handlers to dispatcher
   populateDispatcher(dispatcher, storage, context);
   // send pipe identifiers to client
@@ -63,7 +61,7 @@ const populateDispatcher = (dispatcher, storage, context) => {
     // TODO: consolidate runArc and uiEvent with spawn and event, as well as
     // use of runtime object and composerFactory, brokerFactory below.
     runArc: async (msg, tid, bus) => {
-      return await runArc(msg, bus, runtime);
+      return await runArc(msg, bus, runtime, storage);
     },
     uiEvent: async (msg, tid, bus) => {
       return await uiEvent(msg, runtime);

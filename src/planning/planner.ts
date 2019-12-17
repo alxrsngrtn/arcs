@@ -258,7 +258,10 @@ export class Planner implements InspectablePlanner {
     if (!this.speculator || this.noSpecEx) {
       return false;
     }
-    if (plan.handleConnections.some(({type}) => type.toString() === `[Description {Text key, Text value}]`)) {
+
+    // TODO(cypher1): Remove handling for preslandles syntax once preslandles syntax is not supported.
+    if (plan.handleConnections.some(({type}) => type.toString() === `[Description {key: Text, value: Text}]`)
+     || plan.handleConnections.some(({type}) => type.toString() === `[Description {Text key, Text value}]`)) {
       return true;
     }
     const planPatternsWithTokens = plan.patterns.filter(p => p.includes('${'));
@@ -273,7 +276,7 @@ export class Planner implements InspectablePlanner {
         const particle = plan.particles.find(p => p.name === tokens[0]);
         assert(particle);
         const handleConn = particle.getConnectionByName(tokens[1]);
-        if (handleConn && handleConn.handle && RecipeUtil.directionCounts(handleConn.handle).out > 0) {
+        if (handleConn && handleConn.handle && RecipeUtil.directionCounts(handleConn.handle).writes > 0) {
           return true;
         }
       }
@@ -283,7 +286,7 @@ export class Planner implements InspectablePlanner {
       const allTokens = Description.getAllTokens(particle.spec.pattern);
       for (const tokens of allTokens) {
         const handleConn = particle.getConnectionByName(tokens[0]);
-        if (handleConn && handleConn.handle && RecipeUtil.directionCounts(handleConn.handle).out > 0) {
+        if (handleConn && handleConn.handle && RecipeUtil.directionCounts(handleConn.handle).writes > 0) {
           return true;
         }
       }

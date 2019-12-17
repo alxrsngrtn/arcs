@@ -15,6 +15,9 @@ import {MockSlotComposer} from '../../runtime/testing/mock-slot-composer.js';
 import {StubLoader} from '../../runtime/testing/stub-loader.js';
 import {Manifest} from '../../runtime/manifest.js';
 import {Runtime} from '../../runtime/runtime.js';
+import {storageKeyPrefixForTest} from '../../runtime/testing/handle-for-test.js';
+
+import {Entity} from '../../runtime/entity.js';
 
 describe('DevtoolsArcInspector', () => {
   before(() => DevtoolsForTests.ensureStub());
@@ -30,17 +33,17 @@ describe('DevtoolsArcInspector', () => {
     });
     const context = await Manifest.parse(`
       schema Foo
-        Text value
+        value: Text
       particle P in 'p.js'
-        inout Foo foo
+        foo: reads writes Foo
       recipe
-        use as foo
+        foo: use *
         P
-          foo = foo`);
+          foo: foo`);
     const runtime = new Runtime(loader, MockSlotComposer, context);
-    const arc = runtime.newArc('demo', 'volatile://', {inspectorFactory: devtoolsArcInspectorFactory});
+    const arc = runtime.newArc('demo', storageKeyPrefixForTest(), {inspectorFactory: devtoolsArcInspectorFactory});
 
-    const foo = arc.context.findSchemaByName('Foo').entityClass();
+    const foo = Entity.createEntityClass(arc.context.findSchemaByName('Foo'), null);
     const fooStore = await arc.createStore(foo.type, undefined, 'fooStore');
 
     const recipe = arc.context.recipes[0];
@@ -75,7 +78,7 @@ describe('DevtoolsArcInspector', () => {
         trustChecks: [],
         args: [{
           dependentConnections: [],
-          direction: 'inout',
+          direction: 'reads writes',
           isOptional: false,
           name: 'foo'
         }]

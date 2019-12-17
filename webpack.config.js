@@ -14,7 +14,7 @@ const CircularDependencyPlugin = require('circular-dependency-plugin');
 const lib = './shells/lib';
 
 // Decrease MAX_CYCLES every time you eliminate circular dependencies from the codebase.
-const MAX_CYCLES = 15;
+const MAX_CYCLES = 0;
 let numCyclesDetected = 0;
 
 module.exports = {
@@ -24,9 +24,7 @@ module.exports = {
   },
   devtool: 'source-map',
   entry: {
-    worker: `${lib}/source/worker.js`,
-    firebase: `${lib}/source/firebase.js`,
-    pouchdb: `${lib}/source/pouchdb.js`
+    worker: `${lib}/source/worker.js`
   },
   output: {
     filename: '[name].js',
@@ -55,7 +53,11 @@ module.exports = {
       onEnd({compilation}) {
         if (numCyclesDetected > MAX_CYCLES) {
           compilation.errors.push(new Error(
-            `Detected ${numCyclesDetected} cycles which exceeds configured limit of ${MAX_CYCLES}`
+            `cycle detection: ${numCyclesDetected} cycles exceeds configured limit of ${MAX_CYCLES}`
+          ));
+        } else if (numCyclesDetected > 0) {
+          compilation.warnings.unshift(new Error(
+            `cycle detection: ${numCyclesDetected} cycles found (configured limit is ${MAX_CYCLES})`
           ));
         }
       },

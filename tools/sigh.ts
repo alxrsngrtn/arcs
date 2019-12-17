@@ -25,7 +25,6 @@ const _DO_NOT_USE_spawn = require('child_process').spawn;
 const projectRoot = path.resolve(__dirname, '..');
 process.chdir(projectRoot);
 
-let keepProcessAlive = false;
 let globalOptions = {
   install: false,
   quiet: false,
@@ -55,37 +54,43 @@ import {ClaimType} from '../../runtime/particle-claim.js';
 const build = buildPath('.', cleanObsolete);
 const webpack = webpackPkg('webpack');
 const webpackTools = webpackPkg('webpack-tools');
+const webpackStorage = webpackPkg('storage');
 
 const buildLS = buildPath('./src/tools/language-server', () => {
   getOptionalDependencies(['vscode-jsonrpc', 'vscode-languageserver'], 'Build the languageServer');
 });
 const webpackLS = webpackPkg('webpack-languageserver');
 
-const steps: {[index: string]: ((args?: string[]) => boolean)[]} = {
+const steps: {[index: string]: ((args?: string[]) => boolean|Promise<boolean>)[]} = {
   languageServer: [peg, build, buildLS, webpackLS],
   peg: [peg, railroad],
   railroad: [railroad],
   test: [peg, railroad, build, runTests],
   testShells: [peg, railroad, build, webpack, devServerAsync, testWdioShells],
   testWdioShells: [testWdioShells],
-  webpack: [peg, railroad, build, webpack],
+  webpack: [peg, railroad, build, lint, tslint, webpack],
+  webpackStorage: [webpackStorage],
   webpackTools: [peg, build, webpackTools],
   build: [peg, build],
   watch: [watch],
-  lint: [peg, build, lint, tslint],
+  buildifier: [buildifier],
+  lint: [peg, build, lint, tslint, cycles, buildifier],
   tslint: [peg, build, tslint],
+  cycles: [cycles],
   check: [check],
   clean: [clean],
   unit: [unit],
   health: [health],
   bundle: runNodeScriptSteps('bundle'),
   schema2wasm: runNodeScriptSteps('schema2wasm'),
-  devServer: [peg, build, devServer],
+  devServer: [peg, build, webpack, devServer],
   flowcheck: runNodeScriptSteps('flowcheck'),
   run: [peg, build, runNodeScript],
   licenses: [build],
-  default: [check, peg, railroad, build, runTestsOrHealthOnCron, webpack,
-            webpackTools, lint, tslint, devServerAsync, testWdioShells],
+  default: [
+    check, peg, railroad, build, lint, tslint, buildifier, cycles, runTestsOrHealthOnCron,
+    webpack, webpackTools, webpackStorage, devServerAsync, testWdioShells
+  ]
 };
 
 /**
@@ -114,7 +119,7 @@ const cleanFiles = ['manifest-railroad.html', eslintCache];
 const cleanDirs = ['shell/build', 'shells/lib/build', 'build', 'dist', 'src/gen', 'test-output', 'user-test', coverageDir];
 
 // RE pattern to exclude when finding within project source files.
-const srcExclude = /\b(node_modules|deps|build|gen|dist|third_party|hackathon|server|javaharness|Kotlin|particles[/\\]Native)\b/;
+const srcExclude = /\b(node_modules|deps|build|gen|dist|third_party|hackathon|cloud|javaharness|Kotlin|particles[/\\]Native)\b/;
 
 // RE pattern to exclude when finding within project built files.
 const buildExclude = /\b(node_modules|deps|src|third_party|javaharness|Kotlin)\b/;
@@ -537,6 +542,55 @@ function lint(args: string[]): boolean {
   return report.errorCount === 0;
 }
 
+/** Runs buildifier on all BUILD files. */
+function buildifier(args: string[]): boolean {
+  const options = minimist(args, {
+    boolean: ['fix'],
+  });
+
+  const buildifierOptions = ['--warnings=+out-of-order-load,-module-docstring,-bzl-visibility'];
+  if (options.fix) {
+    buildifierOptions.push('--lint=fix', '--mode=fix');
+  } else {
+    buildifierOptions.push('--lint=warn', '--mode=check');
+  }
+
+  const exclude = /^(node_modules|dist)$/;
+  const include = /(WORKSPACE|BUILD|BUILD\.bazel|\.bzl)$/;
+  let allSucceeded = true;
+  for (const file of findProjectFiles(process.cwd(), exclude, include)) {
+    const result = saneSpawnSync('npx', ['buildifier', ...buildifierOptions, file]);
+    if (!result) {
+      console.log('failed target was ' + file);
+      allSucceeded = false;
+    }
+  }
+  return allSucceeded;
+}
+
+/** Reports on cyclic dependencies. */
+async function cycles(args: string[]): Promise<boolean> {
+  sighLog('Counting circular dependencies in runtime code');
+  sighLog('This is informative only until all cycles have been removed');
+  // We are interested only in the runtime code, not the shells or devtools
+  // TS support in madge 3.6.0 can't cope with our compiler version, 3.7.2 as of 12/12/19,
+  // so we analyze the JS output in ./build rather than the TS.
+  const madge = require('madge');
+  const res = (await madge('./build')).circular();
+  if (res.length) {
+    sighLog(`⭯ Found ${res.length} circular dependencies:\n`);
+    for (let i = 0; i < res.length; i++) {
+      sighLog(`${i + 1}) ${res[i].join(' > ')}`);
+    }
+    sighLog('');
+  }
+
+  // TODO For now this is just informative, so always succeeds. Once all circular
+  // dependencies are removed, it should return the result code to fail if any
+  // are found.
+  return true;
+}
+
 function licenses(): boolean {
   const result = saneSpawnSyncWithOutput('npm', ['run', 'test:licenses']);
   if (result.stdout) {
@@ -628,7 +682,7 @@ function saneSpawnSyncWithOutput(cmd: string, args: string[], opts?: SpawnOption
   return {success: spawnWasSuccessful(result, opts), stdout: result.stdout.toString(), stderr: result.stderr.toString()};
 }
 
-function runTestsOrHealthOnCron(args: string[]): boolean {
+async function runTestsOrHealthOnCron(args: string[]): Promise<boolean> {
   if (isTravisDaily) {
     // The travis cron job should add the following arguments when running the health command.
     args.push('--all', '--uploadCodeHealthStats');
@@ -751,6 +805,8 @@ function runTests(args: string[]): boolean {
               });
             });
         process.on('unhandledRejection', (reason, promise) => {
+          console.error('Uncaught Exception');
+          console.error(reason);
           runner.abort();
           throw reason;
         });
@@ -807,7 +863,7 @@ function runTests(args: string[]): boolean {
 }
 
 // Watches for file changes, then runs the steps for the first item in args, passing the remaining items.
-function watch(args: string[]): boolean {
+async function watch(args: string[]): Promise<boolean> {
   const [chokidar] = getOptionalDependencies(['chokidar'], 'The watch command');
 
   const options = minimist(args, {
@@ -821,7 +877,6 @@ function watch(args: string[]): boolean {
     ignored: new RegExp(`(node_modules|build/|.git|user-test/|test-output/|${eslintCache}|bundle-cli.js|wasm/|bazel-.*/)`),
     persistent: true
   });
-  keepProcessAlive = true; // Tell the runner to not exit.
   let timeout = null;
   const changes = new Set();
   watcher.on('change', path => {
@@ -829,17 +884,17 @@ function watch(args: string[]): boolean {
       clearTimeout(timeout);
     }
     changes.add(path);
-    timeout = setTimeout(() => {
+    timeout = setTimeout(async () => {
       sighLog(`\nRebuilding due to changes to:\n  ${[...changes].join('\n  ')}`);
       changes.clear();
-      runSteps(command, options._);
+      await runSteps(command, options._);
       timeout = null;
     }, 500);
   });
-  return true;
+  return new Promise(() => {});  // never resolves, so the script will stay alive indefinitely
 }
 
-function health(args: string[]): boolean {
+async function health(args: string[]): Promise<boolean> {
   const options = minimist(args, {
     boolean: ['migration', 'types', 'tests', 'nullChecks', 'uploadCodeHealthStats', 'all'],
   });
@@ -898,11 +953,12 @@ function health(args: string[]): boolean {
   }
 
   // Generating coverage report from tests.
-  const testResult = runSteps('test', testOptions);
+  const testResult = await runSteps('test', testOptions);
 
   if (options.tests) {
     return saneSpawnSync('node_modules/.bin/c8', ['report']);
   }
+
 
   const healthInformation: string[] = [];
 
@@ -947,32 +1003,32 @@ function health(args: string[]): boolean {
   line();
 
   if (options.uploadCodeHealthStats) {
-    uploadCodeHealthStats(request, healthInformation, testResult);
+    return uploadCodeHealthStats(request, healthInformation, testResult);
   }
   return testResult;
 }
 
-function uploadCodeHealthStats(request, data: string[], testResult: boolean) {
+async function uploadCodeHealthStats(request, data: string[], testResult: boolean): Promise<boolean> {
   sighLog('Uploading health data');
   const trigger = 'https://us-central1-arcs-screenshot-uploader.cloudfunctions.net/arcs-health-uploader';
 
   const branchTo = process.env.TRAVIS_BRANCH || 'unknown-branch';
   const branchFrom = process.env.TRAVIS_PULL_REQUEST_BRANCH || 'unknown-branch';
+  const date = new Date().toString();
 
-  const info = [branchTo, branchFrom, new Date().toString()];
-
-  request.post(trigger, {
-    json: [[...info, ...data]]
-  }, (error, response, body) => {
-    if (error || response.statusCode !== 200) {
-      console.error(error);
-      console.error(response.toJSON());
-    } else {
-      sighLog(`Upload response status: ${response.statusCode}`);
-    }
-    process.exit(testResult ? 0 : 1);
+  return new Promise<boolean>((resolve, reject) => {
+    request.post(trigger, {
+      json: [[branchTo, branchFrom, date, ...data]]
+    }, (error, response) => {
+      if (error) {
+        reject(error);
+      } else if (response.statusCode !== 200) {
+        reject(response.toJSON());
+      } else {
+        resolve(testResult);
+      }
+    });
   });
-  keepProcessAlive = true; // Tell the runner to not exit.
 }
 
 // Single place to put all common node flags for running node tools.
@@ -1011,8 +1067,15 @@ function devServerAsync(args: string[]) : boolean {
 }
 
 function testWdioShells(args: string[]) : boolean {
-  return saneSpawnSync('node_modules/.bin/wdio', ['--baseUrl',
-      'http://localhost:8786/', fixPathForWindows(path.resolve('shells/tests/wdio.conf.js')), ...args]);
+  return saneSpawnSync('node_modules/.bin/wdio', [
+      '--baseUrl',
+      'http://localhost:8786/',
+      // TODO(sjmiles): `fixPathForWindows` caused this to fail on my
+      // windows machine (`e:/path/` becomes `e:/e:/path/`)
+      //fixPathForWindows(path.resolve('shells/tests/wdio.conf.js'))*/,
+      path.resolve('shells/tests/wdio.conf.js'),
+      ...args
+  ]);
 }
 
 /**
@@ -1041,7 +1104,7 @@ function runNodeScriptSteps(scriptName: string) {
 }
 
 // Looks up the steps for `command` and runs each with `args`.
-function runSteps(command: string, args: string[]): boolean {
+async function runSteps(command: string, args: string[]): Promise<boolean> {
   const funcs = steps[command];
   if (funcs === undefined) {
     sighLog(`Unknown command: '${command}'`);
@@ -1064,7 +1127,7 @@ function runSteps(command: string, args: string[]): boolean {
   try {
     for (const func of funcs) {
       sighLog(`🙋 ${func.name}`);
-      if (!func(args)) {
+      if (!await func(args)) {
         sighLog(`🙅 ${func.name}`);
         return false;
       }
@@ -1091,8 +1154,4 @@ if (args[0] === '--quiet') {
   args = args.slice(1);
 }
 
-const result = runSteps(args[0] || 'default', args.slice(1));
-
-if (!keepProcessAlive) { // the watch command is running.
-  process.exit(result ? 0 : 1);
-}
+void runSteps(args[0] || 'default', args.slice(1)).then(res => process.exit(res ? 0 : 1));

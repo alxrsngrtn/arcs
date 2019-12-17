@@ -8,6 +8,7 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
+import '../../../storage/pouchdb/pouch-db-provider.js';
 import {assert} from '../../../../platform/chai-web.js';
 import {Arc} from '../../../arc.js';
 import {Loader} from '../../../../platform/loader.js';
@@ -19,8 +20,6 @@ import {StorageProviderFactory} from '../../../storage/storage-provider-factory.
 import {CallbackTracker} from '../../../testing/callback-tracker.js';
 import {EntityType, ReferenceType} from '../../../type.js';
 import {Id, ArcId} from '../../../id.js';
-
-const testUrl = 'pouchdb://memory/user-test';
 
 // TODO(lindner): run tests for remote and local variants
 ['pouchdb://memory/user-test/', 'pouchdb://local/user-test/'].forEach((testUrl) => {
@@ -65,7 +64,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('supports basic construct and mutate', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = createStorage(arc.id);
@@ -83,7 +82,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('resolves concurrent set', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = createStorage(arc.id);
@@ -114,7 +113,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('enables referenceMode by default', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
 
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
@@ -137,7 +136,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('supports references', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
 
       const arc = new Arc({id: ArcId.newForTest('test'),  context: manifest, loader: new Loader()});
@@ -160,7 +159,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('supports basic construct and mutate', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = createStorage(arc.id);
@@ -179,7 +178,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('resolves concurrent add of same id', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = createStorage(arc.id);
@@ -200,7 +199,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('resolves concurrent add/remove of same id', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = createStorage(arc.id);
@@ -220,7 +219,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('resolves concurrent add of different id', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = createStorage(arc.id);
@@ -241,7 +240,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('enables referenceMode by default', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
 
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
@@ -269,7 +268,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('supports removeMultiple', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = new StorageProviderFactory(arc.id);
@@ -289,7 +288,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('supports references', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
 
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
@@ -315,7 +314,7 @@ describe('pouchdb for ' + testUrl, () => {
     it('supports removeMultiple', async () => {
       const manifest = await Manifest.parse(`
         schema Bar
-          Text value
+          value: Text
       `);
       const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader: new Loader()});
       const storage = createStorage(arc.id);

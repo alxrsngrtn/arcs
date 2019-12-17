@@ -34,10 +34,6 @@ export class DirectStore<T extends CRDTTypeRecord> extends ActiveStore<T> {
     super(options);
   }
 
-  async getLocalData(): Promise<CRDTData> {
-    return this.localModel.getData();
-  }
-
   async serializeContents(): Promise<T['data']> {
     await this.idle();
     return this.localModel.getData();
@@ -98,7 +94,6 @@ export class DirectStore<T extends CRDTTypeRecord> extends ActiveStore<T> {
   }
 
   private deliverCallbacks(thisChange: CRDTChange<T>, messageFromDriver: boolean, channel: number) {
-
     if (thisChange.changeType === ChangeType.Operations && thisChange.operations.length > 0) {
       this.callbacks.forEach((cb, id) => {
         if (messageFromDriver || channel !== id) {
@@ -127,7 +122,9 @@ export class DirectStore<T extends CRDTTypeRecord> extends ActiveStore<T> {
     // Don't send to the driver if we're already in sync and there are no driver-side changes.
     if (noDriverSideChanges) {
       // Need to record the driver version so that we can continue to send.
-      this.setState(DirectStoreState.Idle);
+      if (messageFromDriver) {
+        this.setState(DirectStoreState.Idle);
+      }
       this.version = version;
       return;
     }
@@ -221,6 +218,9 @@ export class DirectStore<T extends CRDTTypeRecord> extends ActiveStore<T> {
   // a return value of true implies that the message was accepted, a
   // return value of false requires that the proxy send a model sync
   async onProxyMessage(message: ProxyMessage<T>): Promise<boolean> {
+    if (typeof message.id !== 'number') {
+      throw new Error('Direct Store received message from StorageProxy without an ID');
+    }
     if (this.pendingException) {
       throw this.pendingException;
     }
@@ -253,6 +253,9 @@ export class DirectStore<T extends CRDTTypeRecord> extends ActiveStore<T> {
   on(callback: ProxyCallback<T>) {
     const id = this.nextCallbackID++;
     this.callbacks.set(id, callback);
+    if (this.version > 0) {
+      noAwait(callback({type: ProxyMessageType.ModelUpdate, model: this.localModel.getData(), id}));
+    }
     return id;
   }
   off(callback: number) {

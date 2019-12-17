@@ -9,11 +9,11 @@
  */
 
 import {assert} from '../platform/assert-web.js';
-import {Collection, Storable, unifiedHandleFor} from './handle.js';
+import {HandleOld, Collection, Storable, unifiedHandleFor} from './handle.js';
 import {ParticleExecutionContext} from './particle-execution-context.js';
 import {ReferenceType, EntityType} from './type.js';
-import {Entity} from './entity.js';
-import {SerializedEntity, StorageProxy} from './storage-proxy.js';
+import {Entity, SerializedEntity} from './entity.js';
+import {StorageProxy} from './storage-proxy.js';
 import {SYMBOL_INTERNALS} from './symbols.js';
 import {CollectionHandle} from './storageNG/handle.js';
 
@@ -125,3 +125,9 @@ export abstract class ClientReference extends Reference {
     };
   }
 }
+
+function makeReference(data: {id: string, storageKey: string | null}, type: ReferenceType, context: ParticleExecutionContext): Reference {
+ return new Reference(data, type, context);
+}
+
+HandleOld.makeReference = makeReference;

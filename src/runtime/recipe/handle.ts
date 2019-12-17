@@ -10,11 +10,9 @@
 
 import {assert} from '../../platform/assert-web.js';
 import {ParticleSpec} from '../particle-spec.js';
-import {TypeVariableInfo} from '../type-variable-info.js';
 import {Schema} from '../schema.js';
-import {Type, SlotType, TypeVariable} from '../type.js';
+import {Type, TypeVariable, TypeVariableInfo} from '../type.js';
 import {Slot} from './slot.js';
-import {SlotInfo} from '../slot-info.js';
 import {HandleConnection} from './handle-connection.js';
 import {SlotConnection} from './slot-connection.js';
 import {Recipe, CloneMap, RecipeComponent, IsResolvedOptions, IsValidOptions, ToStringOptions, VariableMap} from './recipe.js';
@@ -23,7 +21,6 @@ import {compareArrays, compareComparables, compareStrings, Comparable} from './c
 import {Fate, Direction} from '../manifest-ast-nodes.js';
 import {ClaimIsTag, Claim} from '../particle-claim.js';
 import {StorageKey} from '../storageNG/storage-key.js';
-import {Flags} from '../flags.js';
 
 export class Handle implements Comparable<Handle> {
   private readonly _recipe: Recipe;
@@ -230,7 +227,7 @@ export class Handle implements Comparable<Handle> {
     const tags = new Set<string>();
     for (const connection of this._connections) {
       // A remote handle cannot be connected to an output param.
-      if (this.fate === 'map' && ['out', 'inout'].includes(connection.direction)) {
+      if (this.fate === 'map' && ['writes', 'reads writes'].includes(connection.direction)) {
         if (options && options.errors) {
           options.errors.set(this, `Invalid fate '${this.fate}' for handle '${this}'; it is used for '${connection.direction}' ${connection.getQualifiedName()} connection`);
         }
@@ -322,25 +319,14 @@ export class Handle implements Comparable<Handle> {
     // TODO: type? maybe output in a comment
     const result: string[] = [];
     const name = (nameMap && nameMap.get(this)) || this.localName;
-    if (Flags.defaultToPreSlandlesSyntax) {
-      result.push(this.fate);
-      if (this.id) {
-        result.push(`'${this.id}'`);
-      }
-      result.push(...this.tags.map(a => `#${a}`));
-      if (name) {
-        result.push(`as ${name}`);
-      }
-    } else {
-      if (name) {
-        result.push(`${name}:`);
-      }
-      result.push(this.fate);
-      if (this.id) {
-        result.push(`'${this.id}'`);
-      }
-      result.push(...this.tags.map(a => `#${a}`));
+    if (name) {
+      result.push(`${name}:`);
     }
+    result.push(this.fate);
+    if (this.id) {
+      result.push(`'${this.id}'`);
+    }
+    result.push(...this.tags.map(a => `#${a}`));
 
     // Debug information etc.
     if (this.type) {
@@ -368,7 +354,7 @@ export class Handle implements Comparable<Handle> {
     return result.join(' ');
   }
 
-  findConnectionByDirection(dir: string): HandleConnection|undefined {
+  findConnectionByDirection(dir: Direction): HandleConnection|undefined {
     return this._connections.find(conn => conn.direction === dir);
   }
 }

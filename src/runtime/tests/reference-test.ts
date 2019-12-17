@@ -14,7 +14,6 @@ import {Manifest} from '../manifest.js';
 import {CollectionStorageProvider, SingletonStorageProvider} from '../storage/storage-provider-base.js';
 import {VolatileStorage} from '../storage/volatile-storage.js';
 import {StubLoader} from '../testing/stub-loader.js';
-import {assertSingletonWillChangeTo} from '../testing/test-util.js';
 import {EntityType, ReferenceType, CollectionType} from '../type.js';
 import {Id} from '../id.js';
 import {collectionHandleForTest, singletonHandleForTest} from '../testing/handle-for-test.js';
@@ -24,26 +23,26 @@ describe('references', () => {
   it('can parse & validate a recipe containing references', async () => {
     const manifest = await Manifest.parse(`
         schema Result
-          Text value
+          value: Text
 
         particle Referencer in 'referencer.js'
-          in Result inResult
-          out Reference<Result> outResult
+          inResult: reads Result
+          outResult: writes &Result
 
         particle Dereferencer in 'dereferencer.js'
-          in Reference<Result> inResult
-          out Result outResult
+          inResult: reads &Result
+          outResult: writes Result
 
         recipe
-          create 'input:1' as handle0
-          create 'reference:1' as handle1
-          create 'output:1' as handle2
+          handle0: create 'input:1'
+          handle1: create 'reference:1'
+          handle2: create 'output:1'
           Referencer
-            inResult <- handle0
-            outResult -> handle1
+            inResult: reads handle0
+            outResult: writes handle1
           Dereferencer
-            inResult <- handle1
-            outResult -> handle2
+            inResult: reads handle1
+            outResult: writes handle2
     `);
     const recipe = manifest.recipes[0];
     assert.isTrue(recipe.normalize());
@@ -58,18 +57,18 @@ describe('references', () => {
     const loader = new StubLoader({
       'manifest': `
         schema Result
-          Text value
+          value: Text
 
         particle Dereferencer in 'dereferencer.js'
-          in Reference<Result> inResult
-          out Result outResult
+          inResult: reads &Result
+          outResult: writes Result
 
         recipe
-          create 'input:1' as handle0
-          create 'output:1' as handle1
+          handle0: create 'input:1'
+          handle1: create 'output:1'
           Dereferencer
-            inResult <- handle0
-            outResult -> handle1
+            inResult: reads handle0
+            outResult: writes handle1
       `,
       'dereferencer.js': `
         defineParticle(({Particle}) => {
@@ -115,18 +114,18 @@ describe('references', () => {
     const loader = new StubLoader({
       'manifest': `
         schema Result
-          Text value
+          value: Text
 
         particle Dereferencer in 'dereferencer.js'
-          in [Reference<Result>] inResult
-          out [Result] outResult
+          inResult: reads [&Result]
+          outResult: writes [Result]
 
         recipe
-          create 'input:1' as handle0
-          create 'output:1' as handle1
+          handle0: create 'input:1'
+          handle1: create 'output:1'
           Dereferencer
-            inResult <- handle0
-            outResult -> handle1
+            inResult: reads handle0
+            outResult: writes handle1
       `,
       'dereferencer.js': `
         defineParticle(({Particle}) => {
@@ -179,18 +178,18 @@ describe('references', () => {
     const loader = new StubLoader({
       manifest: `
         schema Result
-          Text value
+          value: Text
 
         particle Referencer in 'referencer.js'
-          in Result inResult
-          out Reference<Result> outResult
+          inResult: reads Result
+          outResult: writes &Result
 
         recipe
-          create 'input:1' as handle0
-          create 'output:1' as handle1
+          handle0: create 'input:1'
+          handle1: create 'output:1'
           Referencer
-            inResult <- handle0
-            outResult -> handle1
+            inResult: reads handle0
+            outResult: writes handle1
       `,
       'referencer.js': `
         defineParticle(({Particle, Reference}) => {
@@ -222,29 +221,30 @@ describe('references', () => {
 
     const inputStore = arc._stores[0] as SingletonStorageProvider;
     await inputStore.set({id: 'id:1', rawData: {value: 'what a result!'}});
+    await arc.idle;
 
-    const refStore = arc._stores[1];
+    const refStore = arc._stores[1] as SingletonStorageProvider;
     const baseStoreType = new EntityType(manifest.schemas.Result);
-    await assertSingletonWillChangeTo(arc, refStore, 'storageKey',
-                                      arc.storageProviderFactory.baseStorageKey(baseStoreType, 'volatile'));
+    const storageKey = arc.storageProviderFactory.baseStorageKey(baseStoreType, 'volatile');
+    assert.deepStrictEqual((await refStore.get()).rawData, {id: 'id:1', storageKey});
   });
 
   it('can deal with references in schemas', async () => {
     const loader = new StubLoader({
       manifest: `
         schema Result
-          Text value
+          value: Text
 
         particle ExtractReference in 'extractReference.js'
-          in Foo {Reference<Result> result} referenceIn
-          out Result rawOut
+          referenceIn: reads Foo {result: &Result}
+          rawOut: writes Result
 
         recipe
-          create 'input:1' as handle0
-          create 'output:1' as handle1
+          handle0: create 'input:1'
+          handle1: create 'output:1'
           ExtractReference
-            referenceIn <- handle0
-            rawOut -> handle1
+            referenceIn: reads handle0
+            rawOut: writes handle1
         `,
       'extractReference.js': `
         defineParticle(({Particle}) => {
@@ -283,14 +283,16 @@ describe('references', () => {
     const refStore = arc._stores[1] as SingletonStorageProvider;
     assert.strictEqual((refStore.type as EntityType).entitySchema.name, 'Foo');
     await refStore.set({id: 'id:2', rawData: {result: {id: 'id:1', storageKey: backingStore.storageKey}}});
+    await arc.idle;
 
-    await assertSingletonWillChangeTo(arc, arc._stores[0], 'value', 'what a result!');
+    const store = arc._stores[0] as SingletonStorageProvider;
+    assert.deepStrictEqual((await store.get()).rawData, {value: 'what a result!'});
   });
 
   it('can construct references in schemas', async () => {
     // This test looks at different scenarios for creating references
     // inside schemas. It:
-    // * reads a single value from the inout connection 'out'
+    // * reads a single value from the reads writes connection 'out'
     // * reads the single 'inFoo'
     // * reads a collction of Results from 'inResult'.
     // * puts a Result into each of the Foos retrieved from 'out' and 'inFoo'
@@ -298,21 +300,21 @@ describe('references', () => {
     const loader = new StubLoader({
       manifest: `
         schema Result
-          Text value
+          value: Text
 
         particle Referencer in 'referencer.js'
-          in [Result] inResult
-          in Foo {Reference<Result> result, Text shortForm} inFoo
-          inout [Foo {Reference<Result> result, Text shortForm}] outResult
+          inResult: reads [Result]
+          inFoo: reads Foo {result: &Result, shortForm: Text}
+          outResult: reads writes [Foo {result: &Result, shortForm: Text}]
 
         recipe
-          create 'input:1' as handle0
-          create 'input:2' as handle1
-          create 'output:1' as handle2
+          handle0: create 'input:1'
+          handle1: create 'input:2'
+          handle2: create 'output:1'
           Referencer
-            inResult <- handle0
-            inFoo <- handle1
-            outResult = handle2
+            inResult: reads handle0
+            inFoo: reads handle1
+            outResult: handle2
       `,
       'referencer.js': `
         defineParticle(({Particle, Reference}) => {
@@ -404,18 +406,18 @@ describe('references', () => {
     const loader = new StubLoader({
       manifest: `
         schema Result
-          Text value
+          value: Text
 
         particle ExtractReferences in 'extractReferences.js'
-          in Foo {[Reference<Result>] result} referenceIn
-          out [Result] rawOut
+          referenceIn: reads Foo {result: [&Result]}
+          rawOut: writes [Result]
 
         recipe
-          create 'input:1' as handle0
-          create 'output:1' as handle1
+          handle0: create 'input:1'
+          handle1: create 'output:1'
           ExtractReferences
-            referenceIn <- handle0
-            rawOut -> handle1
+            referenceIn: reads handle0
+            rawOut: writes handle1
         `,
       'extractReferences.js': `
         defineParticle(({Particle}) => {
@@ -470,18 +472,18 @@ describe('references', () => {
     const loader = new StubLoader({
       manifest: `
         schema Result
-          Text value
+          value: Text
 
         particle ConstructReferenceCollection in 'constructReferenceCollection.js'
-          out Foo {[Reference<Result>] result} referenceOut
-          in [Result] rawIn
+          referenceOut: writes Foo {result: [&Result]}
+          rawIn: reads [Result]
 
         recipe
-          create 'input:1' as handle0
-          create 'output:1' as handle1
+          handle0: create 'input:1'
+          handle1: create 'output:1'
           ConstructReferenceCollection
-            referenceOut -> handle0
-            rawIn <- handle1
+            referenceOut: writes handle0
+            rawIn: reads handle1
         `,
       'constructReferenceCollection.js': `
         defineParticle(({Particle, Reference}) => {

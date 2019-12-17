@@ -12,7 +12,6 @@ import {Generation} from './planner.js';
 import {Strategizer, Strategy, StrategyParams} from '../planning/strategizer.js';
 import {assert} from '../platform/assert-web.js';
 import {Arc} from '../runtime/arc.js';
-import {Direction} from '../runtime/manifest-ast-nodes.js';
 import {Manifest} from '../runtime/manifest.js';
 import {Modality} from '../runtime/modality.js';
 import {ProvideSlotConnectionSpec, ConsumeSlotConnectionSpec} from '../runtime/particle-spec.js';
@@ -26,8 +25,6 @@ import {Slot} from '../runtime/recipe/slot.js';
 import {Descendant} from '../runtime/recipe/walker.js';
 import {SlotComposer} from '../runtime/slot-composer.js';
 import {Tracing} from '../tracelib/trace.js';
-import {SlotType, CollectionType} from '../runtime/type.js';
-import {SlotInfo} from '../runtime/slot-info.js';
 
 import {PlanningModalityHandler} from './planning-modality-handler.js';
 import {AddMissingHandles} from './strategies/add-missing-handles.js';
@@ -213,7 +210,7 @@ export class RecipeIndex {
       const counts = RecipeUtil.directionCounts(handle);
       const otherCounts = RecipeUtil.directionCounts(otherHandle);
       // Someone has to read and someone has to write.
-      if (otherCounts.in + counts.in === 0 || otherCounts.out + counts.out === 0) {
+      if (otherCounts.reads + counts.reads === 0 || otherCounts.writes + counts.writes === 0) {
         return false;
       }
     }
@@ -298,7 +295,7 @@ export class RecipeIndex {
       if (!providedHandleConn) continue;
 
       const matchingConns = Object.values(particle.connections).filter(handleConn => {
-        return handleConn.direction !== 'host'
+        return handleConn.direction !== 'hosts'
           && (!handleConn.handle || !handleConn.handle.id || handleConn.handle.id === providedHandleConn.handle.id)
           && Handle.effectiveType(providedHandleConn.handle.mappedType, [handleConn]);
       });

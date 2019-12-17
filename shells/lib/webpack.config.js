@@ -19,9 +19,7 @@ module.exports = {
   },
   devtool: 'source-map',
   entry: {
-    worker: `${lib}/source/worker.js`,
-    firebase: `${lib}/source/firebase.js`,
-    pouchdb: `${lib}/source/pouchdb.js`
+    worker: `${lib}/source/worker.js`
   },
   output: {
     filename: '[name].js',

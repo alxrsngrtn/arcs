@@ -15,8 +15,7 @@ import {SlotNode, createSlotNodes, addSlotConnection} from './slot-node.js';
 import {Node, Edge, FlowCondition, FlowCheck} from './graph-internals.js';
 import {Manifest} from '../../runtime/manifest.js';
 import {assert} from '../../platform/assert-web.js';
-import {StoreReference, CheckIsFromHandle, CheckIsFromOutput, CheckIsFromStore, CheckType, CheckCondition, CheckExpression, Check} from '../../runtime/particle-check.js';
-import {HandleConnectionSpec} from '../../runtime/particle-spec.js';
+import {HandleConnectionSpecInterface, StoreReference, CheckIsFromHandle, CheckIsFromOutput, CheckIsFromStore, CheckType, CheckCondition, CheckExpression, Check} from '../../runtime/particle-check.js';
 
 /**
  * Data structure for representing the connectivity graph of a recipe. Used to perform static analysis on a resolved recipe.
@@ -33,8 +32,8 @@ export class FlowGraph {
   /** Maps from particle name to node. */
   readonly particleMap: Map<string, ParticleNode>;
 
-  /** Maps from HandleConnectionSpec to HandleNode. */
-  private readonly handleSpecMap: Map<HandleConnectionSpec, HandleNode> = new Map();
+  /** Maps from HandleConnectionSpecInterface to HandleNode. */
+  private readonly handleSpecMap: Map<HandleConnectionSpecInterface, HandleNode> = new Map();
 
   private readonly manifest: Manifest;
 
@@ -70,12 +69,14 @@ export class FlowGraph {
         this.edgeMap.set(edgeId, edge);
       };
 
-      if (connection.direction === 'inout') {
+      if (connection.direction === 'reads writes') {
         // An inout handle connection is represented by two edges.
         addEdgeWithDirection('in');
         addEdgeWithDirection('out');
-      } else if (connection.direction === 'in' || connection.direction === 'out') {
-        addEdgeWithDirection(connection.direction);
+      } else if (connection.direction === 'reads') {
+        addEdgeWithDirection('in');
+      } else if (connection.direction === 'writes') {
+        addEdgeWithDirection('out');
       } else {
         throw new Error(`Unsupported handle connection direction: ${connection.direction}`);
       }

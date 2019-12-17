@@ -21,7 +21,7 @@ import {Producer, Consumer, Runnable, Dictionary} from '../hot.js';
 import {PropagatedException} from '../arc-exceptions.js';
 import {Store} from './store.js';
 import {noAwait} from '../util.js';
-import {SerializedEntity} from '../storage-proxy.js';
+import {SerializedEntity} from '../entity.js';
 import {ReferenceModeStorageKey} from './reference-mode-storage-key.js';
 
 // ReferenceMode store uses an expanded notion of Reference that also includes a version. This allows stores to block on
@@ -180,16 +180,6 @@ export class ReferenceModeStore<Entity extends SerializedEntity, S extends Dicti
   private registerStoreCallbacks() {
     this.backingStore.on(this.onBackingStore.bind(this));
     this.containerStore.on(this.onContainerStore.bind(this));
-  }
-
-  async getLocalData(): Promise<CRDTData> {
-    const {pendingIds, model} = this.constructPendingIdsAndModel(this.containerStore.localModel.getData());
-    if (pendingIds.length === 0) {
-      return model();
-    } else {
-      return new Promise(resolve =>
-          this.enqueueBlockingSend(pendingIds, () => resolve(model())));
-    }
   }
 
   /**

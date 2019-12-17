@@ -8,8 +8,6 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import '../storage/firebase/firebase-provider.js';
-import '../storage/pouchdb/pouch-db-provider.js';
 import {assert} from '../../platform/chai-web.js';
 import {Arc} from '../arc.js';
 import {HeadlessSlotDomConsumer} from '../headless-slot-dom-consumer.js';
@@ -21,8 +19,7 @@ import {CallbackTracker} from '../testing/callback-tracker.js';
 import {FakeSlotComposer} from '../testing/fake-slot-composer.js';
 import {MockSlotComposer} from '../testing/mock-slot-composer.js';
 import {StubLoader} from '../testing/stub-loader.js';
-import {assertThrowsAsync} from '../testing/test-util.js';
-import * as util from '../testing/test-util.js';
+import {assertThrowsAsync} from '../../testing/test-util.js';
 import {ArcType, SingletonType} from '../type.js';
 import {Runtime} from '../runtime.js';
 import {RecipeResolver} from '../recipe/recipe-resolver.js';
@@ -40,17 +37,20 @@ import {StorageProxy as StorageProxyNG} from '../storageNG/storage-proxy.js';
 import {Entity} from '../entity.js';
 import {RamDiskStorageDriverProvider} from '../storageNG/drivers/ramdisk.js';
 import {ReferenceModeStorageKey} from '../storageNG/reference-mode-storage-key.js';
+// database providers are optional, these tests use these provider(s)
+import '../storage/firebase/firebase-provider.js';
+import '../storage/pouchdb/pouch-db-provider.js';
 
 async function setup(storageKeyPrefix: string | ((arcId: ArcId) => StorageKey)) {
   const loader = new Loader();
   const manifest = await Manifest.parse(`
     import 'src/runtime/tests/artifacts/test-particles.manifest'
     recipe TestRecipe
-      use as handle0
-      use as handle1
+      handle0: use *
+      handle1: use *
       TestParticle
-        foo <- handle0
-        bar -> handle1
+        foo: reads handle0
+        bar: writes handle1
   `, {loader, fileName: process.cwd() + '/input.manifest'});
   const runtime = new Runtime(loader, FakeSlotComposer, manifest);
   const arc = runtime.newArc('test', storageKeyPrefix);
@@ -58,8 +58,8 @@ async function setup(storageKeyPrefix: string | ((arcId: ArcId) => StorageKey)) 
   return {
     arc,
     recipe: manifest.recipes[0],
-    Foo: manifest.findSchemaByName('Foo').entityClass(),
-    Bar: manifest.findSchemaByName('Bar').entityClass(),
+    Foo: Entity.createEntityClass(manifest.findSchemaByName('Foo'), null),
+    Bar: Entity.createEntityClass(manifest.findSchemaByName('Bar'), null),
     loader
   };
 }
@@ -78,29 +78,29 @@ describe('Arc new storage', () => {
     const loader = new StubLoader({
       manifest: `
         schema Data
-          Text value
-          Number size
+          value: Text
+          size: Number
 
         particle TestParticle in 'a.js'
-          in Data var
-          out [Data] col
-          in Data refVar
+          var: reads Data
+          col: writes [Data]
+          refVar: reads Data
 
         recipe
-          use as handle0
-          use as handle1
-          use as handle2
+          handle0: use *
+          handle1: use *
+          handle2: use *
           TestParticle
-            var <- handle0
-            col -> handle1
-            refVar <- handle2
+            var: reads handle0
+            col: writes handle1
+            refVar: reads handle2
       `,
       'a.js': `
         defineParticle(({Particle}) => class Noop extends Particle {});
       `
     });
     const manifest = await Manifest.load('manifest', loader);
-    const dataClass = manifest.findSchemaByName('Data').entityClass();
+    const dataClass = Entity.createEntityClass(manifest.findSchemaByName('Data'), null);
     const id = ArcId.fromString('test');
     const storageKey = new VolatileStorageKey(id, 'unique');
     const arc = new Arc({id, storageKey, loader, context: manifest});
@@ -165,10 +165,8 @@ describe('Arc new storage', () => {
     const refVarStorageProxy2 = new StorageProxyNG('id-3', await refVarStore2.activate(), new SingletonType(dataClass.type));
     const refVarHandle2 = await handleNGFor('crdt-key-3', refVarStorageProxy2, arc2.idGeneratorForTesting, null, true, true, 'refVarHandle') as SingletonHandle<Entity>;
 
-    // TODO(shans): These currently timeout because the backing store isn't persisting properly. When that gets cleaned up,
-    // uncomment these lines.
-    // const refVarData = await refVarHandle2.get();
-    // assert.deepEqual(refVarData, d4);
+    const refVarData = await refVarHandle2.get();
+    assert.deepEqual(refVarData, d4);
   }));
 });
 
@@ -191,12 +189,15 @@ describe('Arc ' + storageKeyPrefix, () => {
     const fooStore = await arc.createStore(Foo.type, undefined, 'test:1');
     const barStore = await arc.createStore(Bar.type, undefined, 'test:2');
     const fooHandle = await singletonHandleForTest(arc, fooStore);
+    const barHandle = await singletonHandleForTest(arc, barStore);
+
     await fooHandle.set(new Foo({value: 'a Foo'}));
     recipe.handles[0].mapToStorage(fooStore);
     recipe.handles[1].mapToStorage(barStore);
     assert(recipe.normalize());
     await arc.instantiate(recipe);
-    await util.assertSingletonWillChangeTo(arc, barStore, 'value', 'a Foo1');
+    await arc.idle;
+    assert.deepStrictEqual(await barHandle.get(), {value: 'a Foo1'});
   });
 
   it('applies new stores to a particle ', async function() {
@@ -209,12 +210,15 @@ describe('Arc ' + storageKeyPrefix, () => {
     const fooStore = await arc.createStore(Foo.type, undefined, 'test:1');
     const barStore = await arc.createStore(Bar.type, undefined, 'test:2');
     const fooHandle = await singletonHandleForTest(arc, fooStore);
+    const barHandle = await singletonHandleForTest(arc, barStore);
+
     recipe.handles[0].mapToStorage(fooStore);
     recipe.handles[1].mapToStorage(barStore);
     recipe.normalize();
     await arc.instantiate(recipe);
     await fooHandle.set(new Foo({value: 'a Foo'}));
-    await util.assertSingletonWillChangeTo(arc, barStore, 'value', 'a Foo1');
+    await arc.idle;
+    assert.deepStrictEqual(await barHandle.get(), {value: 'a Foo1'});
   });
 
   it('optional provided handles do not resolve without parent', async function() {
@@ -226,36 +230,38 @@ describe('Arc ' + storageKeyPrefix, () => {
     const loader = new Loader();
     const manifest = await Manifest.parse(`
       schema Thing
-        Text value
+        value: Text
 
       particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
         description \`particle a two required handles and two optional handles\`
-        in Thing a
-          out Thing b
-        in? Thing c
-          out? Thing d
+        a: reads Thing
+          b: writes Thing
+        c: reads? Thing
+          d: writes? Thing
 
       recipe TestRecipe
-        use as thingA
-        use as thingB
-        use as maybeThingC
-        use as maybeThingD
+        thingA: use *
+        thingB: use *
+        maybeThingC: use *
+        maybeThingD: use *
         TestParticle
-          a <- thingA
-          b -> thingB
+          a: reads thingA
+          b: writes thingB
     `, {loader, fileName: process.cwd() + '/input.manifest'});
 
     const id = ArcId.newForTest('test');
     const storageKey = storageKeyPrefix + id.toString();
     const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-    const thingClass = manifest.findSchemaByName('Thing').entityClass();
+    const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
     const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
     const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
     const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
     const dStore = await arc.createStore(thingClass.type, 'dStore', 'test:4');
     const aHandle = await singletonHandleForTest(arc, aStore);
+    const bHandle = await singletonHandleForTest(arc, bStore);
     const cHandle = await singletonHandleForTest(arc, cStore);
+    const dHandle = await singletonHandleForTest(arc, dStore);
 
     const recipe = manifest.recipes[0];
     recipe.handles[0].mapToStorage(aStore);
@@ -267,11 +273,12 @@ describe('Arc ' + storageKeyPrefix, () => {
 
     await aHandle.set(new thingClass({value: 'from_a'}));
     await cHandle.set(new thingClass({value: 'from_c'}));
-    await util.assertSingletonWillChangeTo(arc, bStore, 'value', 'from_a1');
-    await util.assertSingletonWillChangeTo(arc, dStore, 'value', '(null)');
+    await arc.idle;
+    assert.deepStrictEqual(await bHandle.get(), {value: 'from_a1'});
+    assert.isNull(await dHandle.get());
   });
 
-  it(`instantiates recipes only if fate is correct ` + storageKeyPrefix, async function() {
+  it('instantiates recipes only if fate is correct ' + storageKeyPrefix, async function() {
     if (!storageKeyPrefix.startsWith('volatile')) {
       // TODO(lindner): fix pouch/firebase timing
       this.skip();
@@ -279,23 +286,23 @@ describe('Arc ' + storageKeyPrefix, () => {
     const manifest = await Manifest.parse(`
       schema Thing
       particle A in 'a.js'
-        in Thing thing
+        thing: reads Thing
       recipe CopyStoreFromContext // resolved
-        copy 'storeInContext' as h0
+        h0: copy 'storeInContext'
         A
-          thing = h0
+          thing: h0
       recipe UseStoreFromContext // unresolved
-        use 'storeInContext' as h0
+        h0: use 'storeInContext'
         A
-          thing = h0
+          thing: h0
       recipe CopyStoreFromArc // unresolved
-        copy 'storeInArc' as h0
+        h0: copy 'storeInArc'
         A
-          thing = h0
+          thing: h0
       recipe UseStoreFromArc // resolved
-        use 'storeInArc' as h0
+        h0: use 'storeInArc'
         A
-          thing = h0
+          thing: h0
       resource MyThing
         start
         [
@@ -325,7 +332,7 @@ describe('Arc ' + storageKeyPrefix, () => {
     }
 
     const arc = await runtime.newArc('test2', storageKeyPrefix);
-    const thingClass = manifest.findSchemaByName('Thing').entityClass();
+    const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
     const thingStore = await arc.createStore(thingClass.type, 'name', 'storeInArc');
     const resolver = new RecipeResolver(arc);
 
@@ -345,36 +352,38 @@ describe('Arc ' + storageKeyPrefix, () => {
     const loader = new Loader();
     const manifest = await Manifest.parse(`
       schema Thing
-        Text value
+        value: Text
 
       particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
         description \`particle a two required handles and two optional handles\`
-        in Thing a
-          out Thing b
-        in? Thing c
-          out Thing d
+        a: reads Thing
+          b: writes Thing
+        c: reads? Thing
+          d: writes Thing
 
       recipe TestRecipe
-        use as thingA
-        use as thingB
-        use as maybeThingC
-        use as maybeThingD
+        thingA: use *
+        thingB: use *
+        maybeThingC: use *
+        maybeThingD: use *
         TestParticle
-          a <- thingA
-          b -> thingB
+          a: reads thingA
+          b: writes thingB
     `, {loader, fileName: process.cwd() + '/input.manifest'});
 
     const id = ArcId.newForTest('test');
     const storageKey = storageKeyPrefix + id.toString();
     const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-    const thingClass = manifest.findSchemaByName('Thing').entityClass();
+    const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
     const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
     const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
     const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
     const dStore = await arc.createStore(thingClass.type, 'dStore', 'test:4');
     const aHandle = await singletonHandleForTest(arc, aStore);
+    const bHandle = await singletonHandleForTest(arc, bStore);
     const cHandle = await singletonHandleForTest(arc, cStore);
+    const dHandle = await singletonHandleForTest(arc, dStore);
 
     const recipe = manifest.recipes[0];
     recipe.handles[0].mapToStorage(aStore);
@@ -386,9 +395,9 @@ describe('Arc ' + storageKeyPrefix, () => {
 
     await aHandle.set(new thingClass({value: 'from_a'}));
     await cHandle.set(new thingClass({value: 'from_c'}));
-
-    await util.assertSingletonWillChangeTo(arc, bStore, 'value', 'from_a1');
-    await util.assertSingletonWillChangeTo(arc, dStore, 'value', '(null)');
+    await arc.idle;
+    assert.deepStrictEqual(await bHandle.get(), {value: 'from_a1'});
+    assert.isNull(await dHandle.get());
   });
 
   it('optional provided handles cannot resolve without parent', async () => {
@@ -396,30 +405,30 @@ describe('Arc ' + storageKeyPrefix, () => {
       const loader = new Loader();
       const manifest = await Manifest.parse(`
         schema Thing
-          Text value
+          value: Text
 
         particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
           description \`particle a two required handles and two optional handles\`
-          in Thing a
-            out Thing b
-          in? Thing c
-            out? Thing d
+          a: reads Thing
+            b: writes Thing
+          c: reads? Thing
+            d: writes? Thing
 
         recipe TestRecipe
-          use as thingA
-          use as thingB
-          use as maybeThingC
-          use as maybeThingD
+          thingA: use *
+          thingB: use *
+          maybeThingC: use *
+          maybeThingD: use *
           TestParticle
-            a <- thingA
-            b -> thingB
-            d -> maybeThingD
+            a: reads thingA
+            b: writes thingB
+            d: writes maybeThingD
       `, {loader, fileName: process.cwd() + '/input.manifest'});
       const id = ArcId.newForTest('test');
       const storageKey = storageKeyPrefix + id.toString();
       const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-      const thingClass = manifest.findSchemaByName('Thing').entityClass();
+      const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
       const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
       const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
       const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
@@ -441,31 +450,31 @@ describe('Arc ' + storageKeyPrefix, () => {
       const loader = new Loader();
       const manifest = await Manifest.parse(`
         schema Thing
-          Text value
+          value: Text
 
         particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
           description \`particle a two required handles and two optional handles\`
-          in Thing a
-            out Thing b
-          in? Thing c
-            out Thing d
+          a: reads Thing
+            b: writes Thing
+          c: reads? Thing
+            d: writes Thing
 
         recipe TestRecipe
-          use as thingA
-          use as thingB
-          use as maybeThingC
-          use as maybeThingD
+          thingA: use *
+          thingB: use *
+          maybeThingC: use *
+          maybeThingD: use *
           TestParticle
-            a <- thingA
-            b -> thingB
-            d -> maybeThingD
+            a: reads thingA
+            b: writes thingB
+            d: writes maybeThingD
       `, {loader, fileName: process.cwd() + '/input.manifest'});
 
       const id = ArcId.newForTest('test');
       const storageKey = storageKeyPrefix + id.toString();
       const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-      const thingClass = manifest.findSchemaByName('Thing').entityClass();
+      const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
       const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
       const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
       const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
@@ -490,36 +499,38 @@ describe('Arc ' + storageKeyPrefix, () => {
     const loader = new Loader();
     const manifest = await Manifest.parse(`
       schema Thing
-        Text value
+        value: Text
 
       particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
         description \`particle a two required handles and two optional handles\`
-        in Thing a
-          out Thing b
-        in? Thing c
-          out? Thing d
+        a: reads Thing
+          b: writes Thing
+        c: reads? Thing
+          d: writes? Thing
 
       recipe TestRecipe
-        use as thingA
-        use as thingB
-        use as maybeThingC
-        use as maybeThingD
+        thingA: use *
+        thingB: use *
+        maybeThingC: use *
+        maybeThingD: use *
         TestParticle
-          a <- thingA
-          b -> thingB
-          c <- maybeThingC
+          a: reads thingA
+          b: writes thingB
+          c: reads maybeThingC
     `, {loader, fileName: process.cwd() + '/input.manifest'});
     const id = ArcId.newForTest('test');
     const storageKey = storageKeyPrefix + id.toString();
     const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-    const thingClass = manifest.findSchemaByName('Thing').entityClass();
+    const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
     const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
     const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
     const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
     const dStore = await arc.createStore(thingClass.type, 'dStore', 'test:4');
     const aHandle = await singletonHandleForTest(arc, aStore);
+    const bHandle = await singletonHandleForTest(arc, bStore);
     const cHandle = await singletonHandleForTest(arc, cStore);
+    const dHandle = await singletonHandleForTest(arc, dStore);
 
     const recipe = manifest.recipes[0];
     recipe.handles[0].mapToStorage(aStore);
@@ -533,9 +544,9 @@ describe('Arc ' + storageKeyPrefix, () => {
     await arc.instantiate(recipe);
     await cHandle.set(new thingClass({value: 'from_c'}));
     await arc.instantiate(recipe);
-
-    await util.assertSingletonWillChangeTo(arc, bStore, 'value', 'from_a1');
-    await util.assertSingletonWillChangeTo(arc, dStore, 'value', '(null)');
+    await arc.idle;
+    assert.deepStrictEqual(await bHandle.get(), {value: 'from_a1'});
+    assert.isNull(await dHandle.get());
   });
 
   it('required provided handles must resolve with dependencies', async () =>
@@ -543,30 +554,30 @@ describe('Arc ' + storageKeyPrefix, () => {
       const loader = new Loader();
       const manifest = await Manifest.parse(`
         schema Thing
-          Text value
+          value: Text
 
         particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
           description \`particle a two required handles and two optional handles\`
-          in Thing a
-            out Thing b
-          in? Thing c
-            out Thing d
+          a: reads Thing
+            b: writes Thing
+          c: reads? Thing
+            d: writes Thing
 
         recipe TestRecipe
-          use as thingA
-          use as thingB
-          use as maybeThingC
-          use as maybeThingD
+          thingA: use *
+          thingB: use *
+          maybeThingC: use *
+          maybeThingD: use *
           TestParticle
-            a <- thingA
-            b -> thingB
-            c <- maybeThingC
+            a: reads thingA
+            b: writes thingB
+            c: reads maybeThingC
       `, {loader, fileName: process.cwd() + '/input.manifest'});
       const id = ArcId.newForTest('test');
       const storageKey = storageKeyPrefix + id.toString();
       const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-      const thingClass = manifest.findSchemaByName('Thing').entityClass();
+      const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
       const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
       const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
       const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
@@ -592,37 +603,39 @@ describe('Arc ' + storageKeyPrefix, () => {
     const loader = new Loader();
     const manifest = await Manifest.parse(`
       schema Thing
-        Text value
+        value: Text
 
       particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
         description \`particle a two required handles and two optional handles\`
-        in Thing a
-          out Thing b
-        in? Thing c
-          out? Thing d
+        a: reads Thing
+          b: writes Thing
+        c: reads? Thing
+          d: writes? Thing
 
       recipe TestRecipe
-        use as thingA
-        use as thingB
-        use as maybeThingC
-        use as maybeThingD
+        thingA: use *
+        thingB: use *
+        maybeThingC: use *
+        maybeThingD: use *
         TestParticle
-          a <- thingA
-          b -> thingB
-          c <- maybeThingC
-          d -> maybeThingD
+          a: reads thingA
+          b: writes thingB
+          c: reads maybeThingC
+          d: writes maybeThingD
     `, {loader, fileName: process.cwd() + '/input.manifest'});
     const id = ArcId.newForTest('test');
     const storageKey = storageKeyPrefix + id.toString();
     const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-    const thingClass = manifest.findSchemaByName('Thing').entityClass();
+    const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
     const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
     const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
     const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
     const dStore = await arc.createStore(thingClass.type, 'dStore', 'test:4');
     const aHandle = await singletonHandleForTest(arc, aStore);
+    const bHandle = await singletonHandleForTest(arc, bStore);
     const cHandle = await singletonHandleForTest(arc, cStore);
+    const dHandle = await singletonHandleForTest(arc, dStore);
 
     const recipe = manifest.recipes[0];
     recipe.handles[0].mapToStorage(aStore);
@@ -634,8 +647,9 @@ describe('Arc ' + storageKeyPrefix, () => {
 
     await aHandle.set(new thingClass({value: 'from_a'}));
     await cHandle.set(new thingClass({value: 'from_c'}));
-    await util.assertSingletonWillChangeTo(arc, bStore, 'value', 'from_a1');
-    await util.assertSingletonWillChangeTo(arc, dStore, 'value', 'from_c1');
+    await arc.idle;
+    assert.deepStrictEqual(await bHandle.get(), {value: 'from_a1'});
+    assert.deepStrictEqual(await dHandle.get(), {value: 'from_c1'});
   });
 
   it('required provided handles can resolve with parent 2', async function() {
@@ -646,37 +660,39 @@ describe('Arc ' + storageKeyPrefix, () => {
     const loader = new Loader();
     const manifest = await Manifest.parse(`
       schema Thing
-        Text value
+        value: Text
 
       particle TestParticle in 'src/runtime/tests/artifacts/test-dual-input-particle.js'
         description \`particle a two required handles and two optional handles\`
-        in Thing a
-          out Thing b
-        in? Thing c
-          out Thing d
+        a: reads Thing
+          b: writes Thing
+        c: reads? Thing
+          d: writes Thing
 
       recipe TestRecipe
-        use as thingA
-        use as thingB
-        use as maybeThingC
-        use as maybeThingD
+        thingA: use *
+        thingB: use *
+        maybeThingC: use *
+        maybeThingD: use *
         TestParticle
-          a <- thingA
-          b -> thingB
-          c <- maybeThingC
-          d -> maybeThingD
+          a: reads thingA
+          b: writes thingB
+          c: reads maybeThingC
+          d: writes maybeThingD
     `, {loader, fileName: process.cwd() + '/input.manifest'});
     const id = ArcId.newForTest('test');
     const storageKey = storageKeyPrefix + id.toString();
     const arc = new Arc({slotComposer: new FakeSlotComposer(), loader, context: manifest, id, storageKey});
 
-    const thingClass = manifest.findSchemaByName('Thing').entityClass();
+    const thingClass = Entity.createEntityClass(manifest.findSchemaByName('Thing'), null);
     const aStore = await arc.createStore(thingClass.type, 'aStore', 'test:1');
     const bStore = await arc.createStore(thingClass.type, 'bStore', 'test:2');
     const cStore = await arc.createStore(thingClass.type, 'cStore', 'test:3');
     const dStore = await arc.createStore(thingClass.type, 'dStore', 'test:4');
     const aHandle = await singletonHandleForTest(arc, aStore);
+    const bHandle = await singletonHandleForTest(arc, bStore);
     const cHandle = await singletonHandleForTest(arc, cStore);
+    const dHandle = await singletonHandleForTest(arc, dStore);
 
     const recipe = manifest.recipes[0];
     recipe.handles[0].mapToStorage(aStore);
@@ -688,8 +704,9 @@ describe('Arc ' + storageKeyPrefix, () => {
 
     await aHandle.set(new thingClass({value: 'from_a'}));
     await cHandle.set(new thingClass({value: 'from_c'}));
-    await util.assertSingletonWillChangeTo(arc, bStore, 'value', 'from_a1');
-    await util.assertSingletonWillChangeTo(arc, dStore, 'value', 'from_c1');
+    await arc.idle;
+    assert.deepStrictEqual(await bHandle.get(), {value: 'from_a1'});
+    assert.deepStrictEqual(await dHandle.get(), {value: 'from_c1'});
   });
 
   it('deserializing a serialized empty arc produces an empty arc', async () => {
@@ -716,14 +733,18 @@ describe('Arc ' + storageKeyPrefix, () => {
     let fooStore = await arc.createStore(Foo.type, undefined, 'test:1');
     const fooHandle = await singletonHandleForTest(arc, fooStore);
     const fooStoreCallbacks = await CallbackTracker.create(fooStore, 1);
-
     await fooHandle.set(new Foo({value: 'a Foo'}));
+
     let barStore = await arc.createStore(Bar.type, undefined, 'test:2', ['tag1', 'tag2']);
+    const barHandle = await singletonHandleForTest(arc, barStore);
+
     recipe.handles[0].mapToStorage(fooStore);
     recipe.handles[1].mapToStorage(barStore);
     recipe.normalize();
     await arc.instantiate(recipe);
-    await util.assertSingletonWillChangeTo(arc, barStore, 'value', 'a Foo1');
+    await arc.idle;
+
+    assert.deepStrictEqual(await barHandle.get(), {value: 'a Foo1'});
     assert.strictEqual(fooStore.versionToken, '1');
     assert.strictEqual(barStore.versionToken, '1');
     fooStoreCallbacks.verify();
@@ -745,12 +766,12 @@ describe('Arc ' + storageKeyPrefix, () => {
       import 'src/runtime/tests/artifacts/test-particles.manifest'
 
       recipe
-        slot 'rootslotid-slotid' as slot0
-        use as handle0
+        slot0: slot 'rootslotid-slotid'
+        handle0: use *
         Multiplexer
-          hostedParticle = ConsumerParticle
-          consume annotation as slot0
-          list <- handle0
+          hostedParticle: ConsumerParticle
+          annotation: consumes slot0
+          list: reads handle0
 
     `, {loader, fileName: ''});
 
@@ -803,29 +824,29 @@ describe('Arc ' + storageKeyPrefix, () => {
     const loader = new StubLoader({
       manifest: `
         schema Data
-          Text value
-          Number size
+          value: Text
+          size: Number
 
         particle TestParticle in 'a.js'
-          in Data var
-          out [Data] col
-          inout BigCollection<Data> big
+          var: reads Data
+          col: writes [Data]
+          big: reads writes BigCollection<Data>
 
         recipe
-          use as handle0
-          use as handle1
-          use as handle2
+          handle0: use *
+          handle1: use *
+          handle2: use *
           TestParticle
-            var <- handle0
-            col -> handle1
-            big = handle2
+            var: reads handle0
+            col: writes handle1
+            big: handle2
       `,
       'a.js': `
         defineParticle(({Particle}) => class Noop extends Particle {});
       `
     });
     const manifest = await Manifest.load('manifest', loader);
-    const dataClass = manifest.findSchemaByName('Data').entityClass();
+    const dataClass = Entity.createEntityClass(manifest.findSchemaByName('Data'), null);
     const id = Id.fromString('test');
     const storageKey = storageKeyPrefix + id.toString();
     const arc = new Arc({id, storageKey, loader, context: manifest});
@@ -894,17 +915,17 @@ describe('Arc ' + storageKeyPrefix, () => {
     const loader = new StubLoader({
       manifest: `
         interface HostedInterface
-          in ~a *
+          reads ~a
 
         particle A in 'a.js'
-          host HostedInterface reader
+          reader: hosts HostedInterface
 
         particle B in 'b.js'
-          in Entity {} val
+          val: reads Entity {}
 
         recipe
           A
-            reader = B
+            reader: B
       `,
       '*': 'defineParticle(({Particle}) => class extends Particle {});',
     });
@@ -940,7 +961,7 @@ describe('Arc ' + storageKeyPrefix, () => {
     const id = ArcId.newForTest('test');
     const manifest = await Manifest.parse(`
       schema Data
-        Text value
+        value: Text
       recipe
         description \`abc\``);
     const storageKey = storageKeyPrefix + id.toString();
@@ -996,12 +1017,12 @@ describe('Arc ' + storageKeyPrefix, () => {
 
             innerArc.loadRecipe(\`
               particle ${next} in '${next}.js'
-                consume root
+                root: consumes Slot
 
               recipe
-                slot '\` + hostedSlotId + \`' as hosted
+                hosted: slot '\` + hostedSlotId + \`'
                 ${next}
-                  consume root as hosted
+                  root: consumes hosted
             \`);
           }
 
@@ -1032,12 +1053,12 @@ describe('Arc ' + storageKeyPrefix, () => {
     });
     const context = await Manifest.parse(`
         particle A in 'A.js'
-          consume root
+          root: consumes Slot
 
         recipe
-          slot 'rootslotid-root' as root
+          root: slot 'rootslotid-root'
           A
-            consume root as root
+            root: consumes root
     `);
     const arc = new Arc({id: IdGenerator.newSession().newArcId('arcid'),
       storageKey: 'key', loader, slotComposer, context});
@@ -1057,24 +1078,24 @@ describe('Arc ' + storageKeyPrefix, () => {
 
     const manifest = await Manifest.parse(`
         schema FavoriteFood
-          Text food
+          food: Text
 
         particle FavoriteFoodPicker in 'particles/Profile/source/FavoriteFoodPicker.js'
-          inout [FavoriteFood] foods
+          foods: reads writes [FavoriteFood]
           description \`select favorite foods\`
             foods \`favorite foods\`
 
         recipe FavoriteFood
-          create #favoriteFoods as foods
+          foods: create #favoriteFoods
           FavoriteFoodPicker
-            foods = foods
+            foods: foods
         `, {loader, fileName: process.cwd() + '/input.manifest'});
 
     const storageKey = storageKeyPrefix + id.toString();
     const arc = new Arc({id, storageKey, loader: new Loader(), context: manifest});
     assert.isNotNull(arc);
 
-    const favoriteFoodClass = manifest.findSchemaByName('FavoriteFood').entityClass();
+    const favoriteFoodClass = Entity.createEntityClass(manifest.findSchemaByName('FavoriteFood'), null);
     assert.isNotNull(favoriteFoodClass);
 
     const recipe = manifest.recipes[0];
@@ -1149,7 +1170,7 @@ describe('Arc storage migration', () => {
 
     it('rejects old string storage keys', async () => {
       const {arc, Foo} = await setup('volatile://');
-      assertThrowsAsync(async () => {
+      await assertThrowsAsync(async () => {
         await arc.createStore(Foo.type, undefined, 'test:1');
       }, `Can't use string storage keys with the new storage stack.`);
     });
@@ -1174,7 +1195,7 @@ describe('Arc storage migration', () => {
 
     it('rejects new StorageKey type', async () => {
       const {arc, Foo} = await setup(arcId => new VolatileStorageKey(arcId, ''));
-      assertThrowsAsync(async () => {
+      await assertThrowsAsync(async () => {
         await arc.createStore(Foo.type, undefined, 'test:1');
       }, `Can't use new-style storage keys with the old storage stack.`);
     });

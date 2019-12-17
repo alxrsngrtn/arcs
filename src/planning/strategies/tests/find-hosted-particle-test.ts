@@ -18,6 +18,8 @@ import {InterfaceType} from '../../../runtime/type.js';
 import {FindHostedParticle} from '../../strategies/find-hosted-particle.js';
 import {StrategyTestHelper} from '../../testing/strategy-test-helper.js';
 import {ArcId} from '../../../runtime/id.js';
+import {singletonHandleForTest} from '../../../runtime/testing/handle-for-test.js';
+import {Flags} from '../../../runtime/flags.js';
 
 async function runStrategy(manifestStr) {
   const manifest = await Manifest.parse(manifestStr);
@@ -35,19 +37,19 @@ describe('FindHostedParticle', () => {
       schema OtherThing
 
       particle Matches
-        in Thing thingy
+        thingy: reads Thing
 
       particle DoesNotMatch
-        out Thing thingy
+        thingy: writes Thing
 
       particle AlsoDoesNotMatch
-        in OtherThing thingy
+        thingy: reads OtherThing
 
       interface HostedInterface
-        in Thing *
+        reads Thing
 
       particle Host
-        host HostedInterface hosted
+        hosted: hosts HostedInterface
 
       recipe
         Host
@@ -73,42 +75,42 @@ describe('FindHostedParticle', () => {
       schema LesPaul extends Gibson
 
       particle Lower
-        in Instrument input
+        input: reads Instrument
 
       particle Upper
-        out Gibson output
+        output: writes Gibson
 
       interface HostedInterface
-        inout ~a *
-        consume foo
+        reads writes ~a
+        foo: consumes Slot
       particle Host
-        host HostedInterface hosted
-        inout ~a item
+        hosted: hosts HostedInterface
+        item: reads writes ~a
 
       recipe
-        create as item
+        item: create *
         Lower
-          input = item
+          input: item
         Upper
-          output = item
+          output: item
         Host
-          item = item
+          item: item
 
       particle ThingCandidate
-        inout Thing thingy
-        consume foo
+        thingy: reads writes Thing
+        foo: consumes Slot
       particle InstrumentCandidate
-        inout Instrument instrument
-        consume foo
+        instrument: reads writes Instrument
+        foo: consumes Slot
       particle GuitarCandidate
-        inout Guitar guitar
-        consume foo
+        guitar: reads writes Guitar
+        foo: consumes Slot
       particle GibsonCandidate
-        inout Gibson gibson
-        consume foo
+        gibson: reads writes Gibson
+        foo: consumes Slot
       particle LesPaulCandidate
-        inout LesPaul lp
-        consume foo
+        lp: reads writes LesPaul
+        foo: consumes Slot
     `);
 
     // inout Thing is not be compatible with in Instrument input
@@ -131,13 +133,13 @@ describe('FindHostedParticle', () => {
     //       holding particle spec should have a concrete type. How to fix this?
     assert.isEmpty(await runStrategy(`
       particle Matches
-        in ~a thingy
+        thingy: reads ~a
 
       interface HostedInterface
-        in ~a *
+        reads ~a
 
       particle Host
-        host HostedInterface hosted
+        hosted: hosts HostedInterface
 
       recipe
         Host
@@ -149,11 +151,11 @@ describe('FindHostedParticle', () => {
       import 'src/runtime/tests/artifacts/test-particles.manifest'
 
       recipe
-        create as h0
-        create as h1
+        h0: create *
+        h1: create *
         OuterParticle
-          input = h1
-          output = h0
+          input: h1
+          output: h0
     `, {loader, fileName: process.cwd() + '/input.manifest'});
 
     const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader});
@@ -172,9 +174,22 @@ describe('FindHostedParticle', () => {
 
     assert.isEmpty(arc._stores);
     await arc.instantiate(outRecipe);
-    const particleSpecStore = arc._stores.find(store => store.type instanceof InterfaceType) as SingletonStorageProvider;
-    const particleSpec = await particleSpecStore.get();
+    // TODO(shans): This is not really the right way to look for stores on an arc...
+    const particleSpecStore = arc._stores.find(store => store.type instanceof InterfaceType || store.type.getContainedType() instanceof InterfaceType);
+    let particleSpec;
+    if (Flags.useNewStorageStack) {
+      const handle = await singletonHandleForTest(arc, particleSpecStore);
+      particleSpec = await handle.get();
+    } else {
+      particleSpec = await (particleSpecStore as SingletonStorageProvider).get();
+    }
     assert.isNotNull(particleSpec.id, 'particleSpec stored in handle should have an id');
-    delete particleSpec.id;    assert.deepEqual(manifest.findParticleByName('TestParticle').toLiteral(), particleSpec);
+    delete particleSpec.id;
+    await arc.idle;
+    if (Flags.useNewStorageStack) {
+      assert.deepEqual(manifest.findParticleByName('TestParticle').toLiteral(), particleSpec.toLiteral());
+    } else {
+      assert.deepEqual(manifest.findParticleByName('TestParticle').toLiteral(), particleSpec);
+    }
   });
 });

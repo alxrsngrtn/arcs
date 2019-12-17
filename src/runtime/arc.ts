@@ -29,18 +29,21 @@ import {compareComparables} from './recipe/comparable.js';
 import {SlotComposer} from './slot-composer.js';
 import {StorageProviderBase, SingletonStorageProvider} from './storage/storage-provider-base.js';
 import {StorageProviderFactory} from './storage/storage-provider-factory.js';
-import {ArcType, CollectionType, EntityType, InterfaceType, RelationType, Type, TypeVariable, SingletonType, ReferenceType} from './type.js';
+import {ArcType, CollectionType, EntityType, InterfaceInfo, InterfaceType,
+        RelationType, ReferenceType, SingletonType, Type, TypeVariable} from './type.js';
 import {PecFactory} from './particle-execution-context.js';
-import {InterfaceInfo} from './interface-info.js';
 import {Mutex} from './mutex.js';
 import {Dictionary} from './hot.js';
 import {Runtime} from './runtime.js';
-import {VolatileMemory, VolatileStorageDriverProvider, VolatileStorageKey, VolatileDriver} from './storageNG/drivers/volatile.js';
+import {VolatileMemory, VolatileStorageDriverProvider, VolatileStorageKey} from './storageNG/drivers/volatile.js';
 import {DriverFactory, Exists} from './storageNG/drivers/driver-factory.js';
 import {StorageKey} from './storageNG/storage-key.js';
 import {Store} from './storageNG/store.js';
 import {KeyBase} from './storage/key-base.js';
 import {UnifiedStore} from './storageNG/unified-store.js';
+import {StorageProxy} from './storageNG/storage-proxy.js';
+import {SingletonHandle} from './storageNG/handle.js';
+import {unifiedHandleFor} from './handle.js';
 import {Flags} from './flags.js';
 import {CRDTTypeRecord} from './crdt/crdt.js';
 import {ArcSerializer, ArcInterface} from './arc-serializer.js';
@@ -274,14 +277,11 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
 
     await Promise.all(manifest.stores.map(async storeStub => {
       const tags = manifest.storeTags.get(storeStub);
+      if (storeStub.storageKey instanceof VolatileStorageKey) {
+        arc.volatileMemory.deserialize(storeStub.storeInfo.model, storeStub.storageKey.unique);
+      }
       const store = await storeStub.activate();
       await arc._registerStore(store.baseStore, tags);
-      if (store.baseStore.storageKey instanceof VolatileStorageKey) {
-        const driver = new VolatileDriver<{}>(store.baseStore.storageKey, Exists.MayExist, arc.volatileMemory);
-        driver.registerReceiver(() => true);
-        await driver.send(store.baseStore.storeInfo.model, 1);
-        // TODO(shans): Remove driver from driver list
-      }
     }));
     const recipe = manifest.activeRecipe.clone();
     const options: IsValidOptions = {errors: new Map()};
@@ -457,8 +457,12 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
         type = type.resolvedType();
         assert(type.isResolved(), `Can't create handle for unresolved type ${type}`);
 
+        const volatileKey = recipeHandle.immediateValue ? (
+          Flags.useNewStorageStack ? new VolatileStorageKey(this.id, '') : 'volatile'
+        ) : undefined;
+
         const newStore = await this.createStore(type, /* name= */ null, this.generateID().toString(),
-            recipeHandle.tags, recipeHandle.immediateValue ? 'volatile' : null);
+            recipeHandle.tags, volatileKey);
         if (recipeHandle.immediateValue) {
           const particleSpec = recipeHandle.immediateValue;
           const type = recipeHandle.type;
@@ -468,7 +472,14 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
           particleClone.id = newStore.id;
           // TODO(shans): clean this up when we have interfaces for Singleton, Collection, etc.
           // tslint:disable-next-line: no-any
-          await (newStore as any).set(particleClone);
+          if (Flags.useNewStorageStack) {
+            const proxy = new StorageProxy(this.generateID().toString(), await newStore.activate(), newStore.type);
+            const handle = unifiedHandleFor({proxy, idGenerator: this.idGenerator, particleId: this.generateID().toString()});
+            // tslint:disable-next-line: no-any
+            await (handle as SingletonHandle<any>).set(particleClone);
+          } else {
+            await (newStore as SingletonStorageProvider).set(particleClone);
+          }
         } else if (['copy', 'map'].includes(recipeHandle.fate)) {
           const copiedStoreRef = this.context.findStoreById(recipeHandle.id);
           const copiedActiveStore = await copiedStoreRef.activate();
@@ -502,14 +513,19 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
           storageKey = this.keyForId(recipeHandle.id);
         }
         assert(storageKey, `couldn't find storage key for handle '${recipeHandle}'`);
-        const type = recipeHandle.type.resolvedType();
+        let type = recipeHandle.type.resolvedType();
         assert(type.isResolved());
         if (typeof storageKey === 'string') {
           const store = await this.storageProviderFactory.connect(recipeHandle.id, type, storageKey);
           assert(store, `store '${recipeHandle.id}' was not found (${storageKey})`);
           await this._registerStore(store, recipeHandle.tags);
         } else {
-          throw new Error('Need to implement storageNG code path here!');
+          if (!type.isSingleton && !type.isCollectionType()) {
+            type = new SingletonType(type);
+          }
+          const store = new Store({storageKey, exists: Exists.ShouldExist, type, id: recipeHandle.id});
+          assert(store, `store '${recipeHandle.id}' was not found (${storageKey})`);
+          await this._registerStore(store, recipeHandle.tags);
         }
       }
     }
@@ -569,6 +585,11 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
       if (typeof storageKey === 'string') {
         throw new Error(`Can't use string storage keys with the new storage stack.`);
       }
+      // Wrap entity types in a singleton.
+      if (type.isEntity || type.isInterface) {
+        // TODO: Once recipes can handle singleton types this conversion can be removed.
+        type = new SingletonType(type);
+      }
       store = new Store({storageKey, exists: Exists.MayExist, type, id, name});
     } else {
       if (typeof storageKey !== 'string') {
@@ -593,7 +614,9 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
     tags = tags || [];
     tags = Array.isArray(tags) ? tags : [tags];
 
-
+    if (Flags.useNewStorageStack && !(store.type.handleConstructor())) {
+      throw new Error(`Type not supported by new storage stack: '${store.type.tag}'`);
+    }
     this.storesById.set(store.id, store);
     this.storesByKey.set(store.storageKey, store);
 
@@ -636,6 +659,9 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
   // TODO: now that this is only used to implement findStoresByType we can probably replace
   // the check there with a type system equality check or similar.
   static _typeToKey(type: Type): string | InterfaceInfo | null {
+    if (type.isSingleton) {
+      type = type.getContainedType();
+    }
     const elementType = type.getContainedType();
     if (elementType) {
       const key = this._typeToKey(elementType);
@@ -663,7 +689,7 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
           return true;
         }
       } else {
-        if (type instanceof TypeVariable && !type.isResolved() && handle.type instanceof EntityType) {
+        if (type instanceof TypeVariable && !type.isResolved() && handle.type instanceof EntityType || handle.type instanceof SingletonType) {
           return true;
         }
         // elementType will only be non-null if type is either Collection or BigCollection; the tag
@@ -682,8 +708,10 @@ constructor({id, context, pecFactories, slotComposer, loader, storageKey, storag
 
     // Quick check that a new handle can fulfill the type contract.
     // Rewrite of this method tracked by https://github.com/PolymerLabs/arcs/issues/1636.
-    return stores.filter(s => !!Handle.effectiveType(
-      type, [{type: s.type, direction: (s.type instanceof InterfaceType) ? 'host' : 'inout'}]));
+    return stores.filter(s => {
+      const storeType = s.type.isSingleton ? s.type.getContainedType() : s.type;
+      return !!Handle.effectiveType(type, [{type: storeType, direction: (storeType instanceof InterfaceType) ? 'hosts' : 'reads writes'}]);
+    });
   }
 
   findStoreById(id: string): UnifiedStore {

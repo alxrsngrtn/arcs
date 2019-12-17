@@ -5,21 +5,18 @@
 #include "src/wasm/cpp/arcs.h"
 #include "src/wasm/cpp/tests/entities.h"
 
+template<typename T>
 class TestBase : public arcs::Particle {
 public:
-  TestBase() {
-    registerHandle("errors", errors_);
-  }
-
   virtual void before_each() {}
 
   bool check(bool ok, const std::string& condition, std::string file, int line) {
     if (!ok) {
-      arcs::Test_Data err;
+      T err;
       if (auto pos = file.find_last_of("\\/"); pos != std::string::npos) {
         file = file.substr(pos + 1);
       }
-      err.set_txt("[" + test_name_ + "] " + file + ":" + std::to_string(line) +
+      err.set_msg("[" + test_name_ + "] " + file + ":" + std::to_string(line) +
                   ": " + condition);
       errors_.store(err);
       marker_ = 'X';
@@ -27,9 +24,9 @@ public:
     return ok;
   }
 
-  template<typename T>
-  bool check_container(bool is_ordered, const T& container,
-                       std::function<std::string(const typename T::value_type&)> converter,
+  template<typename C>
+  bool check_container(bool is_ordered, const C& container,
+                       std::function<std::string(const typename C::value_type&)> converter,
                        std::vector<std::string> expected, const std::string& file, int line) {
     if (container.size() != expected.size()) {
       std::string msg = "expected container to have " + std::to_string(expected.size()) +
@@ -74,7 +71,7 @@ public:
   }
 
   std::string test_name_;
-  arcs::Collection<arcs::Test_Data> errors_;
+  arcs::Collection<T> errors_{"errors", this};
   char marker_;
 };
 

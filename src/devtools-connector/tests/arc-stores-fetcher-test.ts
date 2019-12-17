@@ -15,7 +15,11 @@ import {FakeSlotComposer} from '../../runtime/testing/fake-slot-composer.js';
 import {StubLoader} from '../../runtime/testing/stub-loader.js';
 import {Manifest} from '../../runtime/manifest.js';
 import {Runtime} from '../../runtime/runtime.js';
-import {VolatileSingleton} from '../../runtime/storage/volatile-storage.js';
+import {SingletonType} from '../../runtime/type.js';
+import {singletonHandleForTest, storageKeyPrefixForTest} from '../../runtime/testing/handle-for-test.js';
+import {Flags} from '../../runtime/flags.js';
+
+import {Entity} from '../../runtime/entity.js';
 
 describe('ArcStoresFetcher', () => {
   before(() => DevtoolsForTests.ensureStub());
@@ -24,13 +28,14 @@ describe('ArcStoresFetcher', () => {
   it('allows fetching a list of arc stores', async () => {
     const context = await Manifest.parse(`
       schema Foo
-        Text value`);
+        value: Text`);
     const runtime = new Runtime(new StubLoader({}), FakeSlotComposer, context);
-    const arc = runtime.newArc('demo', 'volatile://', {inspectorFactory: devtoolsArcInspectorFactory});
+    const arc = runtime.newArc('demo', storageKeyPrefixForTest(), {inspectorFactory: devtoolsArcInspectorFactory});
 
-    const foo = arc.context.findSchemaByName('Foo').entityClass();
-    const fooStore = await arc.createStore(foo.type, 'fooStoreName', 'fooStoreId', ['awesome', 'arcs']);
-    await (fooStore as VolatileSingleton).set({value: 'persistence is useful'});
+    const foo = Entity.createEntityClass(arc.context.findSchemaByName('Foo'), null);
+    const fooStore = await arc.createStore(new SingletonType(foo.type), 'fooStoreName', 'fooStoreId', ['awesome', 'arcs']);
+    const fooHandle = await singletonHandleForTest(arc, fooStore);
+    await fooHandle.set(new foo({value: 'persistence is useful'}));
 
     assert.isEmpty(DevtoolsForTests.channel.messages.filter(
         m => m.messageType === 'fetch-stores-result'));
@@ -46,31 +51,39 @@ describe('ArcStoresFetcher', () => {
 
     // Location in the schema file is stored in the type and used by some tools.
     // We don't assert on it in this test.
-    delete results[0].messageBody.arcStores[0].type.entitySchema.fields.value.location;
+    delete results[0].messageBody.arcStores[0].type.innerType.entitySchema.fields.value.location;
+
+    const sessionId = arc.idGeneratorForTesting.currentSessionIdForTesting;
+    const entityId = Flags.useNewStorageStack ?
+        '!' + sessionId + ':demo:test-proxy2:3' :
+        '!' + sessionId + ':fooStoreId:1';
 
     assert.deepEqual(results[0].messageBody, {
       arcStores: [{
         id: 'fooStoreId',
         name: 'fooStoreName',
         tags: ['awesome', 'arcs'],
-        storage: `volatile://${arc.id.toString()}^^volatile-0`,
+        storage: fooStore.storageKey,
         type: {
-          tag: 'Entity',
-          entitySchema: {
-            description: {},
-            fields: {
-              value: {
-                kind: 'schema-primitive',
-                type: 'Text'
-              }
+          innerType: {
+            tag: 'Entity',
+            entitySchema: {
+              description: {},
+              fields: {
+                value: {
+                  kind: 'schema-primitive',
+                  refinement: null,
+                  type: 'Text'
+                }
+              },
+              names: ['Foo']
             },
-            names: ['Foo']
-          }
+            refinement: null,
+          },
+          tag: 'Singleton',
         },
         description: undefined,
-        value: {
-          value: 'persistence is useful'
-        }
+        value: {id: entityId, rawData: {value: 'persistence is useful'}}
       }],
       // Context stores from manifests have been moved to a temporary StorageStub implementation,
       // StorageStub does not allow for fetching value. Let's add a test for context store after
@@ -90,15 +103,15 @@ describe('ArcStoresFetcher', () => {
     });
     const context = await Manifest.parse(`
       schema Foo
-        Text value
+        value: Text
       particle P in 'p.js'
-        inout Foo foo
+        foo: reads writes Foo
       recipe
-        create as foo
+        foo: create *
         P
-          foo = foo`);
+          foo: foo`);
     const runtime = new Runtime(loader, FakeSlotComposer, context);
-    const arc = runtime.newArc('demo', 'volatile://', {inspectorFactory: devtoolsArcInspectorFactory});
+    const arc = runtime.newArc('demo', storageKeyPrefixForTest(), {inspectorFactory: devtoolsArcInspectorFactory});
 
     const recipe = arc.context.recipes[0];
     recipe.normalize();

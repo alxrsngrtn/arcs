@@ -10,7 +10,6 @@
 
 import {Manifest} from '../manifest.js';
 import {assert} from '../../platform/chai-web.js';
-import * as util from '../testing/test-util.js';
 import {Arc} from '../arc.js';
 import {Loader} from '../../platform/loader.js';
 import {StubLoader} from '../testing/stub-loader.js';
@@ -18,7 +17,6 @@ import {Recipe} from '../recipe/recipe.js';
 import {EntityType, InterfaceType} from '../type.js';
 import {ParticleSpec} from '../particle-spec.js';
 import {ArcId} from '../id.js';
-import {Direction} from '../manifest-ast-nodes.js';
 import {SingletonStorageProvider} from '../storage/storage-provider-base.js';
 import {singletonHandleForTest} from '../testing/handle-for-test.js';
 
@@ -46,11 +44,11 @@ describe('particle interface loading', () => {
                     \${model}
 
                     recipe
-                      use \${this.inHandle} as handle1
-                      use \${this.outHandle} as handle2
+                      handle1: use \${this.inHandle}
+                      handle2: use \${this.outHandle}
                       \${model.name}
-                        foo <- handle1
-                        bar -> handle2
+                        foo: reads handle1
+                        bar: writes handle2
                   \`);
                 }
               }
@@ -80,9 +78,9 @@ describe('particle interface loading', () => {
       verbs: [],
       implFile: 'outer-particle.js',
       args: [
-        {direction: 'host' as Direction, type: ifaceType, name: 'particle0', dependentConnections: [], isOptional: false},
-        {direction: 'in' as Direction, type: fooType, name: 'input', dependentConnections: [], isOptional: false},
-        {direction: 'out' as Direction, type: barType, name: 'output', dependentConnections: [], isOptional: false}
+        {direction: 'hosts', type: ifaceType, name: 'particle0', dependentConnections: [], isOptional: false},
+        {direction: 'reads', type: fooType, name: 'input', dependentConnections: [], isOptional: false},
+        {direction: 'writes', type: barType, name: 'output', dependentConnections: [], isOptional: false}
       ],
     });
 
@@ -115,8 +113,9 @@ describe('particle interface loading', () => {
     assert(recipe.isResolved(), 'recipe isn\'t resolved');
 
     await arc.instantiate(recipe);
-
-    await util.assertSingletonWillChangeTo(arc, outStore, 'value', 'a foo1');
+    await arc.idle;
+    const outHandle = await singletonHandleForTest(arc, outStore);
+    assert.deepStrictEqual(await outHandle.get(), {value: 'a foo1'});
   });
 
   it('loads interfaces into particles declaratively', async () => {
@@ -125,12 +124,12 @@ describe('particle interface loading', () => {
       import './src/runtime/tests/artifacts/test-particles.manifest'
 
       recipe
-        create as h0
-        create as h1
+        h0: create *
+        h1: create *
         OuterParticle
-          particle0 <- TestParticle
-          output -> h0
-          input <- h1
+          particle0: reads TestParticle
+          output: writes h0
+          input: reads h1
       `, {loader, fileName: './test.manifest'});
 
     const arc = new Arc({id: ArcId.newForTest('test'), context: manifest, loader});
@@ -159,19 +158,19 @@ describe('particle interface loading', () => {
   it('updates transformation particle on inner handle', async () => {
     const manifest = await Manifest.parse(`
       schema Foo
-        Text value
+        value: Text
       particle UpdatingParticle in 'updating-particle.js'
-        out Foo innerFoo
+        innerFoo: writes Foo
       interface TestInterface
-        out Foo *
+        writes Foo
       particle MonitoringParticle in 'monitoring-particle.js'
-        host TestInterface hostedParticle
-        out Foo foo
+        hostedParticle: hosts TestInterface
+        foo: writes Foo
       recipe
-        use as h0
+        h0: use *
         MonitoringParticle
-          foo = h0
-          hostedParticle = UpdatingParticle
+          foo: h0
+          hostedParticle: UpdatingParticle
     `);
     assert.lengthOf(manifest.recipes, 1);
     const recipe = manifest.recipes[0];
@@ -190,9 +189,9 @@ describe('particle interface loading', () => {
                 await this.arc.loadRecipe(Particle.buildManifest\`
                   \${model}
                   recipe
-                    use \${this.innerFooHandle} as h0
+                    h0: use \${this.innerFooHandle}
                     \${model.name}
-                      innerFoo = h0
+                      innerFoo: h0
                 \`);
               }
             }
@@ -225,6 +224,8 @@ describe('particle interface loading', () => {
     assert.isTrue(recipe.isResolved());
 
     await arc.instantiate(recipe);
-    await util.assertSingletonWillChangeTo(arc, fooStore, 'value', 'hello world!!!');
+    await arc.idle;
+    const fooHandle = await singletonHandleForTest(arc, fooStore);
+    assert.deepStrictEqual(await fooHandle.get(), {value: 'hello world!!!'});
   });
 });

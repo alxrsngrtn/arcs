@@ -17,7 +17,6 @@ import {Loader} from '../platform/loader.js';
 import {FakeSlotComposer} from '../runtime/testing/fake-slot-composer.js';
 import {FakePecFactory} from '../runtime/fake-pec-factory.js';
 import {HeadlessSlotDomConsumer} from '../runtime/headless-slot-dom-consumer.js';
-import * as util from '../runtime/testing/test-util.js';
 import {singletonHandleForTest} from '../runtime/testing/handle-for-test.js';
 
 class StubWasmLoader extends Loader {
@@ -41,12 +40,12 @@ describe('Hot Code Reload for JS Particle', async () => {
   it('updates model and template', async () =>{
     const context = await Manifest.parse(`
       particle A in 'A.js'
-        consume root
+        root: consumes Slot
 
       recipe
-        slot 'rootslotid-root' as slot0
+        slot0: slot 'rootslotid-root'
         A
-          consume root as slot0`);
+          root: consumes slot0`);
     const loader = new StubLoader({
       'A.js': `defineParticle(({DomParticle}) => {
         return class extends DomParticle {
@@ -70,8 +69,8 @@ describe('Hot Code Reload for JS Particle', async () => {
     await arc.idle;
     const slotConsumer = slotComposer.consumers[0] as HeadlessSlotDomConsumer;
 
-    assert.deepEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '10'});
-    assert.deepEqual(slotConsumer._content.template, `Hello <span>{{name}}</span>, old age: <span>{{age}}</span>`);
+    assert.deepStrictEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '10'});
+    assert.deepStrictEqual(slotConsumer._content.template, `Hello <span>{{name}}</span>, old age: <span>{{age}}</span>`);
 
     loader._fileMap['A.js'] = `defineParticle(({DomParticle}) => {
       return class extends DomParticle {
@@ -85,26 +84,26 @@ describe('Hot Code Reload for JS Particle', async () => {
     arc.pec.reload(arc.pec.particles);
     await arc.idle;
 
-    assert.deepEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '15'});
-    assert.deepEqual(slotConsumer._content.template, `Hello <span>{{name}}</span>, new age: <span>{{age}}</span>`);
+    assert.deepStrictEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '15'});
+    assert.deepStrictEqual(slotConsumer._content.template, `Hello <span>{{name}}</span>, new age: <span>{{age}}</span>`);
   });
 
   it('ensures new handles are working', async () => {
     const context = await Manifest.parse(`
       schema Person
-        Text name
-        Number age
+        name: Text
+        age: Number
 
       particle A in 'A.js'
-        in Person personIn
-        out Person personOut
+        personIn: reads Person
+        personOut: writes Person
 
       recipe
-        use as personIn
-        use as personOut
+        personIn: use *
+        personOut: use *
         A
-          personIn <- personIn
-          personOut -> personOut
+          personIn: reads personIn
+          personOut: writes personOut
     `);
 
     const loader = new StubLoader({
@@ -142,8 +141,7 @@ describe('Hot Code Reload for JS Particle', async () => {
 
     await arc.instantiate(recipe);
     await arc.idle;
-    await util.assertSingletonWillChangeTo(arc, personStoreOut, 'name', 'Jack');
-    await util.assertSingletonWillChangeTo(arc, personStoreOut, 'age', 30);
+    assert.deepStrictEqual(await personHandleOut.get(), {name: 'Jack', age: 30});
 
     loader._fileMap['A.js'] = `defineParticle(({Particle}) => {
       return class extends Particle {
@@ -165,7 +163,7 @@ describe('Hot Code Reload for JS Particle', async () => {
     await arc.idle;
     await personHandleIn.set(new personHandleIn.entityClass({name: 'Jane', age: 20}));
     await arc.idle;
-    assert.deepEqual(await personHandleOut.get(), {name: 'Jane', age: 18});
+    assert.deepStrictEqual(await personHandleOut.get(), {name: 'Jane', age: 18});
   });
 });
 
@@ -181,12 +179,12 @@ describe('Hot Code Reload for WASM Particle', async () => {
     // wasm-particle.wasm based on the reloaded flag
     const context = await Manifest.parse(`
       particle HotReloadTest in 'bazel-bin/src/tests/source/wasm-particle.wasm'
-        consume root
+        root: consumes Slot
 
       recipe
-        slot 'rootslotid-root' as slot0
+        slot0: slot 'rootslotid-root'
         HotReloadTest
-          consume root as slot0`);
+          root: consumes slot0`);
     const loader = new StubWasmLoader();
 
     const id = ArcId.newForTest('HotReload');
@@ -200,15 +198,15 @@ describe('Hot Code Reload for WASM Particle', async () => {
     await arc.idle;
     const slotConsumer = slotComposer.consumers[0] as HeadlessSlotDomConsumer;
 
-    assert.deepEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '10'});
-    assert.deepEqual(slotConsumer._content.template, `<div>Hello <span>{{name}}</span>, old age: <span>{{age}}</span></div>`);
+    assert.deepStrictEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '10'});
+    assert.deepStrictEqual(slotConsumer._content.template, `<div>Hello <span>{{name}}</span>, old age: <span>{{age}}</span></div>`);
 
     loader.reloaded = true;
     arc.pec.reload(arc.pec.particles);
     await arc.idle;
 
-    assert.deepEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '15'});
-    assert.deepEqual(slotConsumer._content.template, `<div>Hello <span>{{name}}</span>, new age: <span>{{age}}</span></div>`);
+    assert.deepStrictEqual(slotConsumer.getRendering().model,  {name: 'Jack', age: '15'});
+    assert.deepStrictEqual(slotConsumer._content.template, `<div>Hello <span>{{name}}</span>, new age: <span>{{age}}</span></div>`);
   });
 
   it('ensures new handles are working', async () => {
@@ -217,15 +215,15 @@ describe('Hot Code Reload for WASM Particle', async () => {
       import 'src/tests/source/schemas.arcs'
 
       particle ReloadHandleTest in 'build/tests/source/test-module.wasm'
-        in Person personIn
-        out Person personOut
+        personIn: reads Person
+        personOut: writes Person
 
       recipe
-        use as personIn
-        use as personOut
+        personIn: use *
+        personOut: use *
         ReloadHandleTest
-          personIn <- personIn
-          personOut -> personOut`, {loader, fileName: './input.arcs'});
+          personIn: reads personIn
+          personOut: writes personOut`, {loader, fileName: './input.arcs'});
 
     const arc = new Arc({id: ArcId.newForTest('test'), context, loader});
     const personType = context.findTypeByName('Person');
@@ -243,14 +241,13 @@ describe('Hot Code Reload for WASM Particle', async () => {
 
     await arc.instantiate(recipe);
     await arc.idle;
-    await util.assertSingletonWillChangeTo(arc, personStoreOut, 'name', 'Jack');
-    await util.assertSingletonWillChangeTo(arc, personStoreOut, 'age', 30);
+    assert.deepStrictEqual(await personHandleOut.get(), {name: 'Jack', age: 30});
 
     loader.reloaded = true;
     arc.pec.reload(arc.pec.particles);
     await arc.idle;
     await personHandleIn.set(new personHandleIn.entityClass({name: 'Jane', age: 20}));
     await arc.idle;
-    assert.deepEqual(await personHandleOut.get(), {name: 'Jane', age: 18});
+    assert.deepStrictEqual(await personHandleOut.get(), {name: 'Jane', age: 18});
   });
 });

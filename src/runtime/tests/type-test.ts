@@ -10,11 +10,9 @@
 
 import {assert} from '../../platform/chai-web.js';
 import {Manifest} from '../manifest.js';
-import {TypeVariableInfo} from '../type-variable-info.js';
 import {ArcType, BigCollectionType, CollectionType, EntityType, HandleType, InterfaceType,
-        ReferenceType, RelationType, SlotType, Type, TypeVariable} from '../type.js';
-import {Direction} from '../manifest-ast-nodes.js';
-import {Flags} from '../flags.js';
+        ReferenceType, RelationType, SlotType, Type, TypeVariable, TypeVariableInfo} from '../type.js';
+import {Entity} from '../entity.js';
 
 // For reference, this is a list of all the types and their contained data:
 //   EntityType        : Schema
@@ -39,7 +37,19 @@ describe('types', () => {
       const entity = EntityType.make(['Foo'], {value: 'Text'});
       deepEqual(entity.toLiteral(), {
         tag: 'Entity',
-        data: {names: ['Foo'], fields: {value: {kind: 'schema-primitive', type: 'Text'}}, description: {}}
+        refinement: null,
+        data: {names: ['Foo'], fields: {value: {kind: 'schema-primitive', refinement: null, type: 'Text'}}, description: {}}
+      });
+      deepEqual(entity, Type.fromLiteral(entity.toLiteral()));
+      deepEqual(entity, entity.clone(new Map()));
+    });
+
+    it('Entity', async () => {
+      const entity = EntityType.make(['Foo'], {value: {kind: 'schema-primitive', refinement: {kind: 'refinement', expression: {kind: 'unary-expression-node', expr: 'value', operator: 'not'}}, type: 'Text'}}, null, {kind: 'refinement', expression: {kind: 'binary-expression-node', leftExpr: 'a', rightExpr: 'b', operator: 'and'}});
+      deepEqual(entity.toLiteral(), {
+        tag: 'Entity',
+        refinement: {kind: 'refinement', expression: {kind: 'binary-expression-node', leftExpr: 'a', rightExpr: 'b', operator: 'and'}},
+        data: {names: ['Foo'], fields: {value: {kind: 'schema-primitive', refinement: {kind: 'refinement', expression: {kind: 'unary-expression-node', expr: 'value', operator: 'not'}}, type: 'Text'}}, description: {}}
       });
       deepEqual(entity, Type.fromLiteral(entity.toLiteral()));
       deepEqual(entity, entity.clone(new Map()));
@@ -128,12 +138,12 @@ describe('types', () => {
       const entity   = EntityType.make(['Foo'], {value: 'Text'});
       const variable = TypeVariable.make('a', null, null);
       const col      = new CollectionType(entity);
-      const iface    = InterfaceType.make('i', [{type: entity, direction: 'any' as Direction}, {type: variable, direction: 'any' as Direction}, {type: col, direction: 'any' as Direction}], [{name: 'x'}]);
+      const iface    = InterfaceType.make('i', [{type: entity, direction: 'any'}, {type: variable, direction: 'any'}, {type: col, direction: 'any'}], [{name: 'x'}]);
       deepEqual(iface.toLiteral(), {
         tag: 'Interface',
         data: {
           name: 'i',
-          handleConnections: [{type: entity.toLiteral(), direction: 'any' as Direction}, {type: variable.toLiteral(), direction: 'any' as Direction}, {type: col.toLiteral(), direction: 'any' as Direction}],
+          handleConnections: [{type: entity.toLiteral(), direction: 'any'}, {type: variable.toLiteral(), direction: 'any'}, {type: col.toLiteral(), direction: 'any'}],
           slots: [{name: 'x'}]
         }
       });
@@ -198,7 +208,7 @@ describe('types', () => {
       const entity     = EntityType.make(['Foo'], {value: 'Text'});
       const variable   = TypeVariable.make('a', null, null);
       const arcInfo    = new ArcType();
-      const iface      = InterfaceType.make('i', [{type: entity, direction: 'any' as Direction}, {type: variable, direction: 'any' as Direction}, {type: arcInfo, direction: 'any' as Direction}], []);
+      const iface      = InterfaceType.make('i', [{type: entity, direction: 'any'}, {type: variable, direction: 'any'}, {type: arcInfo, direction: 'any'}], []);
 
       const handleInfo = new HandleType();
 
@@ -297,77 +307,56 @@ describe('types', () => {
   });
 
   describe('serialization', () => {
-    it('SLANDLES SYNTAX serializes interfaces', Flags.withPostSlandlesSyntax(async () => {
+    it('serializes interfaces', async () => {
       const entity = EntityType.make(['Foo'], {value: 'Text'});
       const variable = TypeVariable.make('a', null, null);
-      const iface = InterfaceType.make('i', [{type: entity, name: 'foo'}, {type: variable}], [{name: 'x', direction: 'consume'}]);
+      const iface = InterfaceType.make('i', [{type: entity, name: 'foo'}, {type: variable}], [{name: 'x', direction: 'consumes'}]);
       assert.strictEqual(iface.interfaceInfo.toString(),
 `interface i
-  foo: any Foo {value: Text}
-  any ~a
+  foo: Foo {value: Text}
+  ~a
   x: consumes? Slot`);
-    }));
-
-    it('serializes interfaces', Flags.withPreSlandlesSyntax(async () => {
-      const entity = EntityType.make(['Foo'], {value: 'Text'});
-      const variable = TypeVariable.make('a', null, null);
-      const iface = InterfaceType.make('i', [{type: entity, name: 'foo'}, {type: variable}], [{name: 'x', direction: 'consume'}]);
-      assert.strictEqual(iface.interfaceInfo.toString(),
-`interface i
-  any Foo {Text value} foo
-  any ~a *
-  consume x`);
-    }));
+    });
 
     // Regression test for https://github.com/PolymerLabs/arcs/issues/2575
-    it('SLANDLES SYNTAX disregards type variable resolutions in interfaces', Flags.withPostSlandlesSyntax(async () => {
+    it('disregards type variable resolutions in interfaces', async () => {
       const variable = TypeVariable.make('a', null, null);
       variable.variable.resolution = EntityType.make(['Foo'], {value: 'Text'});
       const iface = InterfaceType.make('i', [{type: variable}], []);
       assert.strictEqual(iface.interfaceInfo.toString(),
 `interface i
-  any ~a
+  ~a
 `);
-    }));
-    // Regression test for https://github.com/PolymerLabs/arcs/issues/2575
-    it('disregards type variable resolutions in interfaces', Flags.withPreSlandlesSyntax(async () => {
-      const variable = TypeVariable.make('a', null, null);
-      variable.variable.resolution = EntityType.make(['Foo'], {value: 'Text'});
-      const iface = InterfaceType.make('i', [{type: variable}], []);
-      assert.strictEqual(iface.interfaceInfo.toString(),
-`interface i
-  any ~a *
-`);
-    }));
+    });
   });
 
   describe('integration', () => {
     const manifestText = `
       schema Product
-        Text name
+        name: Text
 
       schema Lego extends Product
-        Text setID
+        setId: Text
 
       particle WritesLego
-        out [Lego] lego
+        lego: writes [Lego]
 
       particle ReadsProduct
-        in [Product] product
+        product: reads [Product]
 
       recipe MatchBasic
-        create as v0
+        v0: create *
         WritesLego
-          lego -> v0
+          lego: writes v0
         ReadsProduct
-          product <- v0
+          product: reads v0
 
       recipe MatchExisting
-        use 'test:1' as v0
+        v0: use 'test:1'
         WritesLego
-          lego -> v0
+          lego: writes v0
         ReadsProduct
-          product <- v0`;
+          product: reads v0`;
 
     it('a subtype matches to a supertype that wants to be read', async () => {
       const manifest = await Manifest.parse(manifestText);
@@ -384,7 +373,7 @@ describe('types', () => {
       const recipe = manifest.recipes[1];
       recipe.handles[0].mapToStorage({
         id: 'test1',
-        type: manifest.findSchemaByName('Product').entityClass().type.collectionOf()
+        type: Entity.createEntityClass(manifest.findSchemaByName('Product'), null).type.collectionOf()
       });
       assert(recipe.normalize());
       assert(recipe.isResolved());
@@ -397,7 +386,7 @@ describe('types', () => {
       const recipe = manifest.recipes[1];
       recipe.handles[0].mapToStorage({
         id: 'test1',
-        type: manifest.findSchemaByName('Lego').entityClass().type.collectionOf()
+        type: Entity.createEntityClass(manifest.findSchemaByName('Lego'), null).type.collectionOf()
       });
       assert(recipe.normalize());
       assert(recipe.isResolved());

@@ -9,10 +9,11 @@
  */
 
 import {generateId} from '../../../../modalities/dom/components/generate-id.js';
-import {Utils} from '../../../lib/utils.js';
+import {Runtime} from '../../../../build/runtime/runtime.js';
 import {recipeByName, instantiateRecipe} from '../lib/utils.js';
 import {portIndustry} from '../pec-port.js';
 import {logsFactory} from '../../../../build/platform/logs-factory.js';
+import {devtoolsArcInspectorFactory} from '../../../../build/devtools-connector/devtools-arc-inspector.js';
 
 const {warn} = logsFactory('pipe');
 
@@ -23,15 +24,14 @@ export const spawn = async ({modality, recipe}, tid, bus, composerFactory, stora
     return null;
   } else {
     // instantiate arc
-    const arc = await Utils.spawn({
+    const arc = await Runtime.spawnArc({
       context,
       //storage,
       id: generateId(),
       composer: composerFactory(modality, bus, tid),
-      portFactories: [portIndustry(bus)]
+      portFactories: [portIndustry(bus)],
+      inspectorFactory: devtoolsArcInspectorFactory,
     });
-    // TODO(sjmiles): why is this here?
-    //arc.tid = tid;
     if (contextRecipe) {
       // instantiate optional recipe
       await instantiateRecipe(arc, contextRecipe);
@@ -39,4 +39,3 @@ export const spawn = async ({modality, recipe}, tid, bus, composerFactory, stora
     return arc;
   }
 };
-

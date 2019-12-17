@@ -9,15 +9,12 @@
  */
 
 import {assert} from '../../platform/chai-web.js';
-import {InterfaceInfo} from '../interface-info.js';
 import {Manifest} from '../manifest.js';
 import {TypeChecker} from '../recipe/type-checker.js';
-import {CollectionType, EntityType, InterfaceType, Type, TypeVariable} from '../type.js';
-import {Direction} from '../manifest-ast-nodes.js';
-import {Flags} from '../flags.js';
+import {CollectionType, EntityType, InterfaceInfo, InterfaceType, Type, TypeVariable} from '../type.js';
 
 describe('interface', () => {
-  it('SLANDLES SYNTAX round trips interface info', Flags.withPostSlandlesSyntax(async () => {
+  it('round trips interface info', async () => {
     const interfStr = `interface HostedInterface
   reads ~a
   name: writes Text {name: Text}
@@ -29,32 +26,18 @@ describe('interface', () => {
     const interf = manifest.interfaces[0];
 
     assert.strictEqual(interf.toString(), interfStr);
-  }));
-
-  it('round trips interface info', Flags.withPreSlandlesSyntax(async () => {
-    const interfStr = `interface HostedInterface
-  in ~a *
-  out Text {Text name} name
-  consume root
-  must provide set of other`;
-    const manifest = await Manifest.parse(interfStr);
-
-    assert.lengthOf(manifest.interfaces, 1);
-    const interf = manifest.interfaces[0];
-
-    assert.strictEqual(interf.toString(), interfStr);
-  }));
+  });
 
   it('finds type variable references in handle connections', () => {
-    const iface = new InterfaceInfo('Test', [{type: TypeVariable.make('a')}], []);
+    const iface = InterfaceInfo.make('Test', [{type: TypeVariable.make('a')}], []);
     assert.lengthOf(iface.typeVars, 1);
     assert.strictEqual(iface.typeVars[0].field, 'type');
     assert.strictEqual(iface.typeVars[0].object[iface.typeVars[0].field].variable.name, 'a');
   });
 
   it('finds type variable references in slots', () => {
-    const iface = new InterfaceInfo('Test', [], [
-      {name: TypeVariable.make('a'), direction: 'consume', isRequired: false, isSet: false}]);
+    const iface = InterfaceInfo.make('Test', [], [
+      {name: TypeVariable.make('a'), direction: 'consumes', isRequired: false, isSet: false}]);
     assert.lengthOf(iface.typeVars, 1);
     assert.strictEqual(iface.typeVars[0].field, 'name');
     assert.strictEqual(iface.typeVars[0].object[iface.typeVars[0].field].variable.name, 'a');
@@ -93,25 +76,25 @@ describe('interface', () => {
         schema NotTest
 
         particle P
-          in Test foo
+          foo: reads Test
 
         particle Q
-          in Test foo
-          in Test foo2
-          in Test foo3
+          foo: reads Test
+          foo2: reads Test
+          foo3: reads Test
 
         particle R
-          out NotTest foo
-          in NotTest bar
-          out Test far
+          foo: writes NotTest
+          bar: reads NotTest
+          far: writes Test
 
         particle S
-          in NotTest bar
-          out Test far
-          out NotTest foo
+          bar: reads NotTest
+          far: writes Test
+          foo: writes NotTest
       `);
     const type = new EntityType(manifest.schemas.Test);
-    const iface = new InterfaceInfo('Test', [{name: 'foo', type: TypeVariable.make('a')}, {direction: 'in' as Direction, type: TypeVariable.make('b')}, {type}], []);
+    const iface = InterfaceInfo.make('Test', [{name: 'foo', type: TypeVariable.make('a')}, {direction: 'reads', type: TypeVariable.make('b')}, {type}], []);
     assert(!iface.particleMatches(manifest.particles[0]));
     assert(iface.particleMatches(manifest.particles[1]));
     assert(iface.particleMatches(manifest.particles[2]));
@@ -123,28 +106,28 @@ describe('interface', () => {
         schema Test
 
         particle P
-          in Test foo
+          foo: reads Test
 
         particle Q
-          in Test foo
-          consume one
+          foo: reads Test
+          one: consumes Slot
 
         particle R
-          in Test foo
-          consume one
-            provide set of other
+          foo: reads Test
+          one: consumes Slot
+            other: provides? [Slot]
 
         particle S
-          in Test foo
-          consume notTest
-            provide one
-            provide set of randomSlot
+          foo: reads Test
+          notTest: consumes Slot
+            one: provides? Slot
+            randomSlot: provides? [Slot]
       `);
     const type = new EntityType(manifest.schemas.Test);
-    const iface = new InterfaceInfo('Test', [
-      {direction: 'in', type}], [
+    const iface = InterfaceInfo.make('Test', [
+      {direction: 'reads', type}], [
         {name: 'one'},
-        {direction: 'provide', isSet: true}]);
+        {direction: 'provides', isSet: true}]);
 
     assert(!iface.particleMatches(manifest.particles[0]));
     assert(!iface.particleMatches(manifest.particles[1]));
@@ -153,28 +136,28 @@ describe('interface', () => {
   });
 
   it('Cannot ensure resolved an unresolved type variable', () => {
-    const iface = new InterfaceInfo('Test', [{type: TypeVariable.make('a')}], []);
+    const iface = InterfaceInfo.make('Test', [{type: TypeVariable.make('a')}], []);
     assert.isFalse(iface.canEnsureResolved());
   });
 
   it('Can ensure resolved a schema type', () => {
     const type = EntityType.make(['Thing'], {});
-    const iface = new InterfaceInfo('Test', [{type, name: 'foo'}, {type, direction: 'in'}, {type}], []);
+    const iface = InterfaceInfo.make('Test', [{type, name: 'foo'}, {type, direction: 'reads'}, {type}], []);
     assert.isTrue(iface.canEnsureResolved());
     assert.isTrue(iface.maybeEnsureResolved());
   });
 
   it('Maybe ensure resolved does not mutate on failure', () => {
     const constrainedType1 = TypeChecker.processTypeList(
-      TypeVariable.make('a'), [{type: EntityType.make(['Thing'], {}), direction: 'in'}]
+      TypeVariable.make('a'), [{type: EntityType.make(['Thing'], {}), direction: 'reads'}]
     );
     const constrainedType2 = TypeChecker.processTypeList(
-      TypeVariable.make('b'), [{type: EntityType.make(['Thing'], {}), direction: 'out'}]
+      TypeVariable.make('b'), [{type: EntityType.make(['Thing'], {}), direction: 'writes'}]
     );
     const unconstrainedType = TypeVariable.make('c');
     const allTypes = [constrainedType1, constrainedType2, unconstrainedType];
 
-    const allTypesIface = new InterfaceInfo('Test',
+    const allTypesIface = InterfaceInfo.make('Test',
       [{type: constrainedType1}, {type: unconstrainedType}, {type: constrainedType2}], []);
     assert.isTrue(allTypes.every(t => !t.isResolved()));
     assert.isFalse(allTypesIface.canEnsureResolved());
@@ -183,7 +166,7 @@ describe('interface', () => {
     assert.isTrue(allTypes.every(t => !t.isResolved()),
         'Types should not have been modified by a failed maybeEnsureResolved()');
 
-    const constrainedOnlyIface = new InterfaceInfo('Test',
+    const constrainedOnlyIface = InterfaceInfo.make('Test',
       [{type: constrainedType1}, {type: constrainedType2}], []);
     assert.isTrue(allTypes.every(t => !t.isResolved()));
     assert.isTrue(constrainedOnlyIface.canEnsureResolved());
@@ -196,28 +179,28 @@ describe('interface', () => {
   it('restricted type constrains type variables in the recipe', async () => {
     const manifest = await Manifest.parse(`
       particle Transformer
-        in [~a] input
-        out [~a] output
+        input: reads [~a]
+        output: writes [~a]
 
       interface HostedInterface
-        in ~a *
+        reads ~a
 
       particle Multiplexer
-        host HostedInterface hostedParticle
-        in [~a] items
+        hostedParticle: hosts HostedInterface
+        items: reads [~a]
 
       recipe
-        use as items
-        create as transformed
+        items: use *
+        transformed: create *
         Transformer
-          input = items
-          output = transformed
+          input: items
+          output: transformed
         Multiplexer
-          items = transformed
+          items: transformed
 
       schema Burrito
       particle BurritoDisplayer
-        in Burrito burrito
+        burrito: reads Burrito
     `);
 
     const recipe = manifest.recipes[0];
@@ -261,36 +244,36 @@ describe('interface', () => {
       schema LesPaul extends Gibson
 
       particle Lower
-        in Instrument input
+        input: reads Instrument
 
       particle Upper
-        out Gibson output
+        output: writes Gibson
 
       interface HostedInterface
-        inout ~a *
+        reads writes ~a
       particle Host
-        host HostedInterface hosted
-        inout ~a item
+        hosted: hosts HostedInterface
+        item: reads writes ~a
 
       recipe
-        create as item
+        item: create *
         Lower
-          input = item
+          input: item
         Upper
-          output = item
+          output: item
         Host
-          item = item
+          item: item
 
       particle ThingCandidate
-        inout Thing thingy
+        thingy: reads writes Thing
       particle InstrumentCandidate
-        inout Instrument instrument
+        instrument: reads writes Instrument
       particle GuitarCandidate
-        inout Guitar guitar
+        guitar: reads writes Guitar
       particle GibsonCandidate
-        inout Gibson gibson
+        gibson: reads writes Gibson
       particle LesPaulCandidate
-        inout LesPaul lp
+        lp: reads writes LesPaul
     `);
 
     const recipe = manifest.recipes[0];
@@ -299,10 +282,10 @@ describe('interface', () => {
     const hostParticle = recipe.particles.find(p => p.name === 'Host');
     const hostedInterface = (hostParticle.spec.getConnectionByName('hosted').type as InterfaceType).interfaceInfo;
 
-    const check = name => hostedInterface.particleMatches(manifest.findParticleByName(name));
+    const check = (name: string) => hostedInterface.particleMatches(manifest.findParticleByName(name));
 
-    // inout Thing is not be compatible with in Instrument input
-    // inout LesPaul is not be compatible with out Gibson output
+    // reads writes Thing is not be compatible with in Instrument input
+    // reads writes LesPaul is not be compatible with out Gibson output
     // Remaining 3 candidates are compatible with Lower and Upper particles.
     assert.isFalse(check('ThingCandidate'));
     assert.isTrue(check('InstrumentCandidate'));

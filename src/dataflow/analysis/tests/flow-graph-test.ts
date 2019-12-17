@@ -13,6 +13,12 @@ import {checkDefined} from '../../../runtime/testing/preconditions.js';
 import {ParticleNode, ParticleOutput, ParticleInput} from '../particle-node.js';
 import {buildFlowGraph} from '../testing/flow-graph-testing.js';
 import {FlowModifier} from '../graph-internals.js';
+import {Flags} from '../../../runtime/flags.js';
+
+const entityString = Flags.useNewStorageStack ?
+  '{"root": {"values": {"ida": {"value": {"id": "ida", "text": "asdf"}, "version": {"u": 1}}}, "version":{"u": 1}}, "locations": {}}'
+  :
+  '[{"text": "asdf"}]';
 
 describe('FlowGraph', () => {
   it('works with empty recipe', async () => {
@@ -138,7 +144,7 @@ describe('FlowGraph', () => {
         text: Text
       resource MyResource
         start
-        [{"text": "asdf"}]
+        ${entityString}
       store MyStore of MyEntity in MyResource
         claim is trusted
       particle P
@@ -229,7 +235,7 @@ describe('FlowGraph', () => {
         text: Text
       resource MyResource
         start
-        [{"text": "asdf"}]
+        ${entityString}
       store MyStore of MyEntity 'my-store-id' in MyResource
       particle P
         input: reads MyEntity
@@ -287,7 +293,7 @@ describe('FlowGraph', () => {
           text: Text
         resource MyResource
           start
-          [{"text": "asdf"}]
+          ${entityString}
         store MyStore of MyEntity 'my-store-id' in MyResource
         particle P
           foo: reads MyEntity
@@ -339,7 +345,7 @@ describe('FlowGraph', () => {
         particle P
           foo: reads Foo {}
           bar: reads Bar {}
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
         recipe R
           P
             foo: reads h1
@@ -354,9 +360,9 @@ describe('FlowGraph', () => {
     it('derives from input with same reference type', async () => {
       const graph = await buildFlowGraph(`
         particle P
-          fooRef: reads Reference<Foo {}>
+          fooRef: reads &Foo {}
           bar: reads Bar {}
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
         recipe R
           P
             fooRef: reads h1
@@ -374,7 +380,7 @@ describe('FlowGraph', () => {
           fooCollection: reads [Foo {}]
           fooBigCollection: reads BigCollection<Foo {}>
           bar: reads Bar {}
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
         recipe R
           P
             fooCollection: reads h1
@@ -393,11 +399,11 @@ describe('FlowGraph', () => {
         schema Baz
           abc: Text
           xyz: Number
-          foo: Reference<Foo {}>
+          foo: &Foo {}
         particle P
           baz: reads Baz
           bar: reads Bar {}
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
         recipe R
           P
             baz: reads h1
@@ -412,7 +418,7 @@ describe('FlowGraph', () => {
     it('derives from output of same type', async () => {
       const graph = await buildFlowGraph(`
         particle P
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
           outFoo: writes Foo {}
         recipe R
           P
@@ -427,7 +433,7 @@ describe('FlowGraph', () => {
     it('derives from output collection containing same type', async () => {
       const graph = await buildFlowGraph(`
         particle P
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
           outFoo: writes [Foo {}]
         recipe R
           P
@@ -442,8 +448,8 @@ describe('FlowGraph', () => {
     it('does not derive from output reference of same type', async () => {
       const graph = await buildFlowGraph(`
         particle P
-          outRef1: writes Reference<Foo {}>
-          outRef2: writes Reference<Foo {}>
+          outRef1: writes &Foo {}
+          outRef2: writes &Foo {}
         recipe R
           P
             outRef1: writes h1
@@ -458,9 +464,9 @@ describe('FlowGraph', () => {
         schema Baz
           abc: Text
           xyz: Number
-          foo: Reference<Foo {}>
+          foo: &Foo {}
         particle P
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
           outBaz: writes Baz
         recipe R
           P
@@ -476,7 +482,7 @@ describe('FlowGraph', () => {
         particle P
           foo: reads Foo {}
           bar: reads Bar {}
-          outRef: writes Reference<Foo {}>
+          outRef: writes &Foo {}
           claim outRef derives from bar
         recipe R
           P

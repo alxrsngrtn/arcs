@@ -14,7 +14,7 @@ import {StubLoader} from '../testing/stub-loader.js';
 import {Manifest} from '../manifest.js';
 import {Runtime} from '../runtime.js';
 import {Arc} from '../arc.js';
-import {singletonHandleForTest, collectionHandleForTest} from '../testing/handle-for-test.js';
+import {singletonHandleForTest, collectionHandleForTest, storageKeyPrefixForTest} from '../testing/handle-for-test.js';
 
 //
 // TODO(sjmiles): deref'ing stores by index is brittle, but `id` provided to create syntax
@@ -40,7 +40,7 @@ const getCollectionData = async (arc: Arc, index: number) => {
 
 const spawnTestArc = async (loader) => {
   const runtime = new Runtime(loader, FakeSlotComposer);
-  const arc = runtime.runArc('test-arc', 'volatile://');
+  const arc = runtime.runArc('test-arc', storageKeyPrefixForTest());
   const manifest = await Manifest.load('manifest', loader);
   const [recipe] = manifest.recipes;
   recipe.normalize();
@@ -57,11 +57,11 @@ describe('ui-particle-api', () => {
       const loader = new StubLoader({
         manifest: `
           particle TestParticle in 'test-particle.js'
-            out Result {Boolean ok} result
+            result: writes Result {ok: Boolean}
           recipe
-            create as result
+            result: create *
             TestParticle
-              result = result
+              result: result
         `,
         'test-particle.js': `defineParticle(({SimpleParticle}) => class extends SimpleParticle {
           // TODO(sjmiles): normally update should never be async
@@ -100,26 +100,26 @@ describe('ui-particle-api', () => {
           particle TestParticle in 'test-particle.js'
             // TODO(sjmiles): file issue: bad syntax below results in an error suggesting
             // that "in" is a bad token, which is misleading (the type decl is bad)
-            //in Stuff [{Text value}] stuff
+            //in Stuff [{value: Text}] stuff
             //
-            out Result {Boolean ok} result
-            out Result2 {Boolean ok} result2
-            out [Stuff {Text value}] stuff
-            out Thing {Text value} thing
-            out Thing2 {Text value} thing2
+            result: writes Result {ok: Boolean}
+            result2: writes Result2 {ok: Boolean}
+            stuff: writes [Stuff {value: Text}]
+            thing: writes Thing {value: Text}
+            thing2: writes Thing2 {value: Text}
           recipe
             // TODO(sjmiles): 'create with id' parses but doesn't work
-            create 'stuff-store' as stuff
-            create as thing
-            create as thing2
-            create as result
-            create as result2
+            stuff: create 'stuff-store'
+            thing: create *
+            thing2: create *
+            result: create *
+            result2: create *
             TestParticle
-              stuff = stuff
-              thing = thing
-              thing2 = thing2
-              result = result
-              result2 = result2
+              stuff: stuff
+              thing: thing
+              thing2: thing2
+              result: result
+              result2: result2
         `,
         'test-particle.js': `defineParticle(({SimpleParticle}) => class extends SimpleParticle {
           // TODO(sjmiles): normally update should never be async
@@ -163,77 +163,81 @@ describe('ui-particle-api', () => {
       const loader = new StubLoader({
         manifest: `
           particle TestParticle in 'test-particle.js'
-            out [Stuff {Text value}] stuff
-            out Thing {Text value} thing
-            out Result {Boolean ok} result
+            stuff: writes [Stuff {value: Text}]
+            thing: writes Thing {value: Text}
+            result: writes Result {ok: Boolean}
           recipe
-            create as result
-            create as stuff
-            create as thing
+            result: create *
+            stuff: create *
+            thing: create *
             TestParticle
-              result = result
-              stuff = stuff
-              thing = thing
+              result: result
+              stuff: stuff
+              thing: thing
         `,
         'test-particle.js': `defineParticle(({SimpleParticle}) => class extends SimpleParticle {
           // TODO(sjmiles): normally update should never be async
           async update() {
-            // add a POJO to a Collection
-            this.add('stuff', {value: 'FooBarPojo'});
             // add an Entity to a Collection
             this.add('stuff', new (this.handles.get('stuff').entityClass)({value: 'FooBarEntity'}));
-            // add an Array of POJO to a Collection
-            this.add('stuff', [{value: 'FooBarP0'}, {value: 'FooBarP1'}]);
             // add an Array of Entities to a Collection
             this.add('stuff', [
-              new (this.handles.get('thing').entityClass)({value: 'FooBarE0'}),
-              new (this.handles.get('thing').entityClass)({value: 'FooBarE1'})
+              new (this.handles.get('stuff').entityClass)({value: 'FooBarE0'}),
+              new (this.handles.get('stuff').entityClass)({value: 'FooBarE1'})
             ]);
             // try to add to a Singleton (expect exception)
             try {
               // TODO(sjmiles): await here because in spite of note above because
               // otherwise I couldn't figure out how to capture the exception
-              await this.add('thing', {value: 'OopsStuffIsCollection'});
+              await this.add(
+                  'thing',
+                  new (this.handles.get('thing').entityClass)({value: 'OopsStuffIsCollection'}));
             } catch(x) {
               this.set('result', {ok: true});
             }
           }
         });`
       });
-      //
+
       const arc = await spawnTestArc(loader);
-      //
+
       const thingData = await getCollectionData(arc, 1);
       const list = JSON.stringify(thingData.map(thing => thing.value).sort());
-      const expected = `["FooBarE0","FooBarE1","FooBarEntity","FooBarP0","FooBarP1","FooBarPojo"]`;
+      const expected = `["FooBarE0","FooBarE1","FooBarEntity"]`;
       assert.equal(list, expected, 'Collection incorrect after adds');
       const resultData = await getSingletonData(arc, 0);
       assert.ok(resultData.ok, 'failed to throw on adding a value to a Singleton');
+      await arc.idle;
     });
 
     it('can `remove` things', async () => {
       const loader = new StubLoader({
         manifest: `
           particle TestParticle in 'test-particle.js'
-            inout [Stuff {Text value}] stuff
-            out Thing {Text value} thing
-            out Result {Boolean ok} result
+            stuff: reads writes [Stuff {value: Text}]
+            thing: writes Thing {value: Text}
+            result: writes Result {ok: Boolean}
           recipe
-            create as result
-            create as stuff
-            create as thing
+            result: create *
+            stuff: create *
+            thing: create *
             TestParticle
-              result = result
-              stuff = stuff
-              thing = thing
+              result: result
+              stuff: stuff
+              thing: thing
         `,
         'test-particle.js': `defineParticle(({SimpleParticle}) => class extends SimpleParticle {
           // TODO(sjmiles): normally update should never be async
           async update(inputs, state) {
             if (!state.tested) {
               state.tested = true;
-              // add an Array of POJO to a Collection
-              await this.add('stuff', [{value: 'FooBarP0'}, {value: 'FooBarP1'}, {value: 'FooBarP2'}, {value: 'FooBarP3'}]);
+              // add an Array of Entities to a Collection
+              await this.add('stuff', [
+                new (this.handles.get('stuff').entityClass)({value: 'FooBarP0'}),
+                new (this.handles.get('stuff').entityClass)({value: 'FooBarP1'}),
+                new (this.handles.get('stuff').entityClass)({value: 'FooBarP2'}),
+                new (this.handles.get('stuff').entityClass)({value: 'FooBarP3'})
+              ]);
               // remove an Entity
               const items = await this.handles.get('stuff').toList();
               await this.remove('stuff', items[0]);
@@ -248,10 +252,14 @@ describe('ui-particle-api', () => {
       //
       const arc = await spawnTestArc(loader);
       //
-      const thingData = await getCollectionData(arc, 1);
-      const list = JSON.stringify(thingData.map(thing => thing.value).sort());
-      const expected = `["FooBarP3"]`;
-      assert.equal(list, expected, 'Collection incorrect after removes');
+      await new Promise(resolve => setTimeout(async () => {
+        await arc.idle;
+        const thingData = await getCollectionData(arc, 1);
+        const list = JSON.stringify(thingData.map(thing => thing.value).sort());
+        const expected = `["FooBarP3"]`;
+        assert.equal(list, expected, 'Collection incorrect after removes');
+        resolve();
+      }, 100));
     });
   });
 });

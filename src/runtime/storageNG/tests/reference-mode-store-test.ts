@@ -19,7 +19,7 @@ import {CRDTCollection, CollectionOpTypes, CollectionData, CollectionOperation, 
 import {CRDTSingleton} from '../../crdt/crdt-singleton.js';
 import {CountType, CollectionType, EntityType, SingletonType} from '../../type.js';
 import {Schema} from '../../schema.js';
-import {SerializedEntity} from '../../storage-proxy.js';
+import {SerializedEntity} from '../../entity.js';
 import {ReferenceModeStorageKey} from '../reference-mode-storage-key.js';
 
 /* eslint-disable no-async-promise-executor */
@@ -138,7 +138,7 @@ describe('Reference Mode Store', async () => {
     // Clone.
     const activeStore2 = await createReferenceModeStore();
     await activeStore2.cloneFrom(activeStore);
-    assert.deepEqual(await activeStore2.getLocalData(), await activeStore.getLocalData());
+    assert.deepEqual(await activeStore2.serializeContents(), await activeStore.serializeContents());
   });
 
   it('will apply and propagate operation updates from proxies to drivers', async () => {

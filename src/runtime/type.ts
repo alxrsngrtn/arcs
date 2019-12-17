@@ -8,32 +8,30 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {EntityClass, Entity} from './entity.js';
+import {assert} from '../platform/assert-web.js';
 import {Id} from './id.js';
-import {InterfaceInfo, HandleConnection, Slot} from './interface-info.js';
 import {SlotInfo} from './slot-info.js';
 import {ArcInfo} from './synthetic-types.js';
-import {TypeVariableInfo} from './type-variable-info.js';
 import {Predicate, Literal} from './hot.js';
 import {CRDTTypeRecord, CRDTModel} from './crdt/crdt.js';
 import {CRDTCount} from './crdt/crdt-count.js';
 import {CRDTCollection} from './crdt/crdt-collection.js';
 import {CRDTSingleton} from './crdt/crdt-singleton.js';
-import {CRDTEntity, SingletonEntityModel, CollectionEntityModel} from './crdt/crdt-entity.js';
-import {CollectionHandle, SingletonHandle, Handle} from './storageNG/handle.js';
-import {ParticleExecutionContext} from './particle-execution-context.js';
-import {Referenceable} from './crdt/crdt-collection.js';
-import {Flags} from './flags.js';
 import {Schema} from './schema.js';
+import * as AstNode from './manifest-ast-nodes.js';
+import {ParticleSpec} from './particle-spec.js';
 
 export interface TypeLiteral extends Literal {
   tag: string;
   // tslint:disable-next-line: no-any
   data?: any;
+  refinement?: AstNode.Refinement;
 }
 
 export type Tag = 'Entity' | 'TypeVariable' | 'Collection' | 'BigCollection' | 'Relation' |
   'Interface' | 'Slot' | 'Reference' | 'Arc' | 'Handle' | 'Count' | 'Singleton';
+
+type TypeFromLiteral = (literal: TypeLiteral) => Type;
 
 export abstract class Type {
   tag: Tag;
@@ -42,34 +40,7 @@ export abstract class Type {
     this.tag = tag;
   }
 
-  static fromLiteral(literal: TypeLiteral) : Type {
-    switch (literal.tag) {
-      case 'Entity':
-        return new EntityType(Schema.fromLiteral(literal.data));
-      case 'TypeVariable':
-        return new TypeVariable(TypeVariableInfo.fromLiteral(literal.data));
-      case 'Collection':
-        return new CollectionType(Type.fromLiteral(literal.data));
-      case 'BigCollection':
-        return new BigCollectionType(Type.fromLiteral(literal.data));
-      case 'Relation':
-        return new RelationType(literal.data.map(t => Type.fromLiteral(t)));
-      case 'Interface':
-        return new InterfaceType(InterfaceInfo.fromLiteral(literal.data));
-      case 'Slot':
-        return new SlotType(SlotInfo.fromLiteral(literal.data));
-      case 'Reference':
-        return new ReferenceType(Type.fromLiteral(literal.data));
-      case 'Arc':
-        return new ArcType();
-      case 'Handle':
-        return new HandleType();
-      case 'Singleton':
-        return new SingletonType(Type.fromLiteral(literal.data));
-      default:
-        throw new Error(`fromLiteral: unknown type ${literal}`);
-    }
-  }
+  static fromLiteral : TypeFromLiteral = null;
 
   abstract toLiteral(): TypeLiteral;
 
@@ -179,9 +150,20 @@ export abstract class Type {
     return false;
   }
 
+  get isEntity(): boolean {
+    return false;
+  }
+
+  get isInterface(): boolean {
+    return false;
+  }
 
   collectionOf() {
     return new CollectionType(this);
+  }
+
+  singletonOf() {
+    return new SingletonType(this);
   }
 
   bigCollectionOf() {
@@ -290,6 +272,7 @@ export class CountType extends Type {
 
 export class SingletonType<T extends Type> extends Type {
   private readonly innerType: T;
+  static handleClass = null;
   constructor(type: T) {
     super('Singleton');
     this.innerType = type;
@@ -308,11 +291,15 @@ export class SingletonType<T extends Type> extends Type {
   }
 
   handleConstructor<T>() {
-    return SingletonHandle;
+    return SingletonType.handleClass;
   }
 
   get isSingleton(): boolean {
     return true;
+  }
+
+  getEntitySchema(): Schema {
+    return this.innerType.getEntitySchema();
   }
 
   toString(options = undefined): string {
@@ -322,14 +309,16 @@ export class SingletonType<T extends Type> extends Type {
 
 export class EntityType extends Type {
   readonly entitySchema: Schema;
+  readonly refinement?: AstNode.Refinement;
 
-  constructor(schema: Schema) {
+  constructor(schema: Schema, refinement?: AstNode.Refinement) {
     super('Entity');
     this.entitySchema = schema;
+    this.refinement = refinement ? refinement : null;
   }
 
-  static make(names: string[], fields: {}, description?): EntityType {
-    return new EntityType(new Schema(names, fields, description));
+  static make(names: string[], fields: {}, description?, refinement?): EntityType {
+    return new EntityType(new Schema(names, fields, description), refinement);
   }
 
   // These type identifier methods are being left in place for non-runtime code.
@@ -350,7 +339,7 @@ export class EntityType extends Type {
   }
 
   toLiteral(): TypeLiteral {
-    return {tag: this.tag, data: this.entitySchema.toLiteral()};
+    return {tag: this.tag, data: this.entitySchema.toLiteral(), refinement: this.refinement};
   }
 
   toString(options = undefined): string {
@@ -501,6 +490,7 @@ export class TypeVariable extends Type {
 
 export class CollectionType<T extends Type> extends Type {
   readonly collectionType: T;
+  static handleClass = null;
 
   constructor(collectionType: T) {
     super('Collection');
@@ -589,7 +579,7 @@ export class CollectionType<T extends Type> extends Type {
   }
 
   handleConstructor<T>() {
-    return CollectionHandle;
+    return CollectionType.handleClass;
   }
 }
 
@@ -701,6 +691,19 @@ export class RelationType extends Type {
   }
 }
 
+export interface HandleConnection {
+  type: Type;
+  name?: string|TypeVariable;
+  direction?: AstNode.Direction; // TODO make required
+}
+
+// TODO(lindner) only tests use optional props
+export interface Slot {
+  name?: string|TypeVariable;
+  direction?: AstNode.SlotDirection;
+  isRequired?: boolean;
+  isSet?: boolean;
+}
 
 export class InterfaceType extends Type {
   readonly interfaceInfo: InterfaceInfo;
@@ -711,7 +714,7 @@ export class InterfaceType extends Type {
   }
 
   static make(name: string, handleConnections: HandleConnection[], slots: Slot[]) {
-    return new InterfaceType(new InterfaceInfo(name, handleConnections, slots));
+    return new InterfaceType(InterfaceInfo.make(name, handleConnections, slots));
   }
 
   get isInterface(): boolean {
@@ -759,7 +762,7 @@ export class InterfaceType extends Type {
   }
 
   _cloneWithResolutions(variableMap): InterfaceType {
-    return new InterfaceType(this.interfaceInfo._cloneWithResolutions(variableMap));
+    return new InterfaceType(this.interfaceInfo.cloneWithResolutions(variableMap));
   }
 
   toLiteral(): TypeLiteral {
@@ -899,7 +902,7 @@ export class ReferenceType extends Type {
   }
 
   toString(options = undefined): string {
-    return 'Reference<' + this.referredType.toString() + '>';
+    return '&' + this.referredType.toString();
   }
 
   toPrettyString(): string {
@@ -948,3 +951,339 @@ export class HandleType extends Type {
     return {tag: this.tag};
   }
 }
+
+interface TypeVariableInfoLiteral {
+  name: string;
+  canWriteSuperset?: TypeLiteral;
+  canReadSubset?: TypeLiteral;
+}
+
+export class TypeVariableInfo {
+  name: string;
+  _canWriteSuperset?: Type|null;
+  _canReadSubset?: Type|null;
+  _resolution?: Type|null;
+
+  constructor(name: string, canWriteSuperset?: Type, canReadSubset?: Type) {
+    this.name = name;
+    this._canWriteSuperset = canWriteSuperset;
+    this._canReadSubset = canReadSubset;
+    this._resolution = null;
+  }
+
+  /**
+   * Merge both the read subset (upper bound) and write superset (lower bound) constraints
+   * of two variables together. Use this when two separate type variables need to resolve
+   * to the same value.
+   */
+  maybeMergeConstraints(variable: TypeVariableInfo): boolean {
+    if (!this.maybeMergeCanReadSubset(variable.canReadSubset)) {
+      return false;
+    }
+    return this.maybeMergeCanWriteSuperset(variable.canWriteSuperset);
+  }
+
+  /**
+   * Merge a type variable's read subset (upper bound) constraints into this variable.
+   * This is used to accumulate read constraints when resolving a handle's type.
+   */
+  maybeMergeCanReadSubset(constraint: Type): boolean {
+    if (constraint == null) {
+      return true;
+    }
+
+    if (this.canReadSubset == null) {
+      this.canReadSubset = constraint;
+      return true;
+    }
+
+    if (this.canReadSubset instanceof SlotType && constraint instanceof SlotType) {
+      // TODO: formFactor compatibility, etc.
+      return true;
+    }
+    if (this.canReadSubset instanceof EntityType && constraint instanceof EntityType) {
+      const mergedSchema = Schema.intersect(this.canReadSubset.entitySchema, constraint.entitySchema);
+      if (!mergedSchema) {
+        return false;
+      }
+
+      this.canReadSubset = new EntityType(mergedSchema);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * merge a type variable's write superset (lower bound) constraints into this variable.
+   * This is used to accumulate write constraints when resolving a handle's type.
+   */
+  maybeMergeCanWriteSuperset(constraint: Type): boolean {
+    if (constraint == null) {
+      return true;
+    }
+
+    if (this.canWriteSuperset == null) {
+      this.canWriteSuperset = constraint;
+      return true;
+    }
+
+    if (this.canWriteSuperset instanceof SlotType && constraint instanceof SlotType) {
+      // TODO: formFactor compatibility, etc.
+      return true;
+    }
+
+    if (this.canWriteSuperset instanceof EntityType && constraint instanceof EntityType) {
+      const mergedSchema = Schema.union(this.canWriteSuperset.entitySchema, constraint.entitySchema);
+      if (!mergedSchema) {
+        return false;
+      }
+
+      this.canWriteSuperset = new EntityType(mergedSchema);
+      return true;
+    }
+    return false;
+  }
+
+  isSatisfiedBy(type: Type): boolean {
+    const constraint = this._canWriteSuperset;
+    if (!constraint) {
+      return true;
+    }
+    if (!(constraint instanceof EntityType) || !(type instanceof EntityType)) {
+      throw new Error(`constraint checking not implemented for ${this} and ${type}`);
+    }
+    return type.getEntitySchema().isMoreSpecificThan(constraint.getEntitySchema());
+  }
+
+  get resolution(): Type|null {
+    if (this._resolution) {
+      return this._resolution.resolvedType();
+    }
+    return null;
+  }
+
+  isValidResolutionCandidate(value: Type): {result: boolean, detail?: string} {
+    const elementType = value.resolvedType().getContainedType();
+    if (elementType instanceof TypeVariable && elementType.variable === this) {
+      return {result: false, detail: 'variable cannot resolve to collection of itself'};
+    }
+    return {result: true};
+  }
+
+  set resolution(value: Type) {
+    assert(!this._resolution);
+
+    const isValid = this.isValidResolutionCandidate(value);
+    assert(isValid.result, isValid.detail);
+
+    let probe = value;
+    while (probe) {
+      if (!(probe instanceof TypeVariable)) {
+        break;
+      }
+      if (probe.variable === this) {
+        return;
+      }
+      probe = probe.variable.resolution;
+    }
+
+    this._resolution = value;
+    this._canWriteSuperset = null;
+    this._canReadSubset = null;
+  }
+
+  get canWriteSuperset(): Type | null {
+    if (this._resolution) {
+      assert(!this._canWriteSuperset);
+      if (this._resolution instanceof TypeVariable) {
+        return this._resolution.variable.canWriteSuperset;
+      }
+      return null;
+    }
+    return this._canWriteSuperset;
+  }
+
+  set canWriteSuperset(value: Type|null) {
+    assert(!this._resolution);
+    this._canWriteSuperset = value;
+  }
+
+  get canReadSubset(): Type | null {
+    if (this._resolution) {
+      assert(!this._canReadSubset);
+      if (this._resolution instanceof TypeVariable) {
+        return this._resolution.variable.canReadSubset;
+      }
+      return null;
+    }
+    return this._canReadSubset;
+  }
+
+  set canReadSubset(value: Type|null) {
+    assert(!this._resolution);
+    this._canReadSubset = value;
+  }
+
+  get hasConstraint() {
+    return this._canReadSubset !== null || this._canWriteSuperset !== null;
+  }
+
+  canEnsureResolved() {
+    if (this._resolution) {
+      return this._resolution.canEnsureResolved();
+    }
+    if (this._canWriteSuperset || this._canReadSubset) {
+      return true;
+    }
+    return false;
+  }
+
+  maybeEnsureResolved() {
+    if (this._resolution) {
+      return this._resolution.maybeEnsureResolved();
+    }
+    if (this._canWriteSuperset) {
+      this.resolution = this._canWriteSuperset;
+      return true;
+    }
+    if (this._canReadSubset) {
+      this.resolution = this._canReadSubset;
+      return true;
+    }
+    return false;
+  }
+
+  toLiteral() {
+    assert(this.resolution == null);
+    return this.toLiteralIgnoringResolutions();
+  }
+
+  toLiteralIgnoringResolutions(): TypeVariableInfoLiteral {
+    return {
+      name: this.name,
+      canWriteSuperset: this._canWriteSuperset && this._canWriteSuperset.toLiteral(),
+      canReadSubset: this._canReadSubset && this._canReadSubset.toLiteral()
+    };
+  }
+
+  static fromLiteral(data: TypeVariableInfoLiteral) {
+    return new TypeVariableInfo(
+        data.name,
+        data.canWriteSuperset ? Type.fromLiteral(data.canWriteSuperset) : null,
+        data.canReadSubset ? Type.fromLiteral(data.canReadSubset) : null);
+  }
+
+  isResolved(): boolean {
+    return this._resolution && this._resolution.isResolved();
+  }
+}
+
+// The interface for InterfaceInfo must live here to avoid circular dependencies.
+export interface HandleConnectionLiteral {
+  type?: TypeLiteral;
+  name?: string|TypeLiteral;
+  direction?: AstNode.Direction;
+}
+
+export interface SlotLiteral {
+  name?: string|TypeLiteral;
+  direction?: AstNode.SlotDirection;
+  isRequired?: boolean;
+  isSet?: boolean;
+}
+
+export interface TypeVarReference {
+  object: HandleConnection|Slot;
+  field: string;
+}
+
+export interface InterfaceInfoLiteral {
+  name: string;
+  handleConnections: HandleConnectionLiteral[];
+  slots: SlotLiteral[];
+}
+
+export type MatchResult = {var: TypeVariable, value: Type, direction: AstNode.Direction};
+
+type Maker = (name: string, handleConnections: HandleConnection[], slots: Slot[]) => InterfaceInfo;
+type HandleConnectionMatcher = (interfaceHandleConnection: HandleConnection, particleHandleConnection: HandleConnection) => boolean|MatchResult[];
+type Deliteralizer = (data: InterfaceInfoLiteral) => InterfaceInfo;
+type SlotMatcher = (interfaceSlot: Slot, particleSlot: Slot) => boolean;
+
+export abstract class InterfaceInfo {
+  name: string;
+  handleConnections: HandleConnection[];
+  slots: Slot[];
+
+  // TODO(lindner) only accessed in tests
+  public readonly typeVars: TypeVarReference[];
+
+  constructor(name: string, handleConnections: HandleConnection[], slots: Slot[]) {
+    assert(name);
+    assert(handleConnections !== undefined);
+    assert(slots !== undefined);
+    this.name = name;
+    this.handleConnections = handleConnections;
+    this.slots = slots;
+    this.typeVars = [];
+  }
+
+  toPrettyString(): string {
+    return 'InterfaceInfo';
+  }
+
+  mergeTypeVariablesByName(variableMap: Map<string, Type>) {
+    this.typeVars.forEach(({object, field}) => object[field] = (object[field] as Type).mergeTypeVariablesByName(variableMap));
+  }
+
+  abstract readonly canReadSubset : InterfaceInfo;
+
+  abstract readonly  canWriteSuperset : InterfaceInfo;
+
+  abstract isMoreSpecificThan(other: InterfaceInfo) : boolean;
+
+  abstract _applyExistenceTypeTest(test: Predicate<TypeVarReference>) : boolean;
+
+  abstract toString() : string;
+
+  static make : Maker = null;
+
+  static fromLiteral : Deliteralizer = null;
+
+  abstract toLiteral(): InterfaceInfoLiteral;
+
+  abstract clone(variableMap: Map<string, Type>) : InterfaceInfo;
+
+  abstract cloneWithResolutions(variableMap: Map<string, Type>) : InterfaceInfo;
+
+  abstract canEnsureResolved() : boolean;
+
+  abstract maybeEnsureResolved() : boolean;
+
+  abstract tryMergeTypeVariablesWith(other: InterfaceInfo) : InterfaceInfo;
+
+  abstract resolvedType() : InterfaceInfo;
+
+  abstract equals(other: InterfaceInfo) : boolean;
+
+  static _updateTypeVar(typeVar: TypeVarReference, update: (t: Type) => Type): void {
+    typeVar.object[typeVar.field] = update(typeVar.object[typeVar.field]);
+  }
+
+  static isTypeVar(reference: TypeVariable | Type | string | boolean): boolean {
+    return reference instanceof TypeVariable || reference instanceof Type && reference.hasVariable;
+  }
+
+  static mustMatch(reference: TypeVariable | Type | string | boolean): boolean {
+    return !(reference == undefined || InterfaceInfo.isTypeVar(reference));
+  }
+
+  static handleConnectionsMatch : HandleConnectionMatcher = null;
+
+  static slotsMatch : SlotMatcher = null;
+
+  abstract particleMatches(particleSpec: ParticleSpec): boolean;
+
+  abstract restrictType(particleSpec: ParticleSpec): boolean;
+}
+

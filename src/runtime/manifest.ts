@@ -13,9 +13,8 @@ import {assert} from '../platform/assert-web.js';
 import {digest} from '../platform/digest-web.js';
 
 import {Id, IdGenerator} from './id.js';
-import {InterfaceInfo} from './interface-info.js';
-import {HandleConnection as InterfaceInfoHandleConnection} from './interface-info.js';
-import {Slot as InterfaceInfoSlot} from './interface-info.js';
+import {HandleConnection as InterfaceInfoHandleConnection} from './type.js';
+import {Slot as InterfaceInfoSlot} from './type.js';
 import {Runnable} from './hot.js';
 import {Loader} from '../platform/loader.js';
 import {ManifestMeta} from './manifest-meta.js';
@@ -33,7 +32,8 @@ import {Search} from './recipe/search.js';
 import {TypeChecker} from './recipe/type-checker.js';
 import {StorageProviderFactory} from './storage/storage-provider-factory.js';
 import {Schema} from './schema.js';
-import {BigCollectionType, CollectionType, EntityType, InterfaceType, ReferenceType, SlotType, Type, TypeVariable, SingletonType} from './type.js';
+import {BigCollectionType, CollectionType, EntityType, InterfaceInfo, InterfaceType,
+        ReferenceType, SlotType, Type, TypeVariable, SingletonType} from './type.js';
 import {Dictionary} from './hot.js';
 import {ClaimIsTag} from './particle-claim.js';
 import {VolatileStorage} from './storage/volatile-storage.js';
@@ -47,8 +47,8 @@ import {StorageKeyParser} from './storageNG/storage-key-parser.js';
 import {VolatileStorageKey} from './storageNG/drivers/volatile.js';
 import {RamDiskStorageKey} from './storageNG/drivers/ramdisk.js';
 import {CRDTSingletonTypeRecord} from './crdt/crdt-singleton.js';
-import {Entity} from './entity.js';
-import {SerializedEntity} from './storage-proxy.js';
+import {Entity, SerializedEntity} from './entity.js';
+import {Runtime} from './runtime.js';
 
 export enum ErrorSeverity {
   Error = 'error',
@@ -366,7 +366,7 @@ export class Manifest {
     // Quick check that a new handle can fulfill the type contract.
     // Rewrite of this method tracked by https://github.com/PolymerLabs/arcs/issues/1636.
     return stores.filter(s => !!Handle.effectiveType(
-      type, [{type: s.type, direction: (s.type instanceof InterfaceType) ? 'host' : 'inout'}]));
+      type, [{type: s.type, direction: (s.type instanceof InterfaceType) ? 'hosts' : 'reads writes'}]));
   }
   findInterfaceByName(name: string) {
     return this._find(manifest => manifest._interfaces.find(iface => iface.name === name));
@@ -474,7 +474,7 @@ ${e.message}
 
     let items: AstNode.All[] = [];
     try {
-      items = parse(content) as AstNode.All[];
+      items = parse(content, {filename: fileName}) as AstNode.All[];
     } catch (e) {
       throw processError(e, true);
     }
@@ -593,7 +593,7 @@ ${e.message}
                 throw new ManifestError(node.location, `Could not merge schema aliases`);
               }
             }
-            node.model = new EntityType(schema);
+            node.model = new EntityType(schema, node.refinement);
             delete node.fields;
             return;
           }
@@ -768,7 +768,7 @@ ${e.message}
       });
     }
     // TODO: move interface to recipe/ and add interface builder?
-    const ifaceInfo = new InterfaceInfo(interfaceItem.name, handles, slots);
+    const ifaceInfo = InterfaceInfo.make(interfaceItem.name, handles, slots);
     manifest._interfaces.push(ifaceInfo);
   }
 
@@ -920,7 +920,7 @@ ${e.message}
       items.byParticle.set(particle, item);
 
       for (const slotConnectionItem of item.slotConnections) {
-        if (slotConnectionItem.direction === 'provide') {
+        if (slotConnectionItem.direction === 'provides') {
           throw new ManifestError(item.location, `invalid slot connection: provide slot must be dependent`);
         }
         let slotConn = particle.getSlotConnectionByName(slotConnectionItem.param);
@@ -947,7 +947,7 @@ ${e.message}
         }
         slotConn.tags = slotConnectionItem.tags || [];
         slotConnectionItem.dependentSlotConnections.forEach(ps => {
-          if (ps.direction === 'consume') {
+          if (ps.direction === 'consumes') {
             throw new ManifestError(item.location, `invalid slot connection: consume slot must not be dependent`);
           }
           if (ps.dependentSlotConnections.length !== 0) {
@@ -1038,7 +1038,7 @@ ${e.message}
             const handle = recipe.newHandle();
             handle.tags = [];
             handle.localName = connectionItem.target.name;
-            if (connection.direction === '`consume' || connection.direction === '`provide') {
+            if (connection.direction === '`consumes' || connection.direction === '`provides') {
               // TODO(jopra): This is something of a hack to catch users who have not forward-declared their slandles.
               handle.fate = '`slot';
             } else {
@@ -1246,6 +1246,16 @@ ${e.message}
 
     if (Flags.useNewStorageStack) {
       const storageKey = item['storageKey'] || manifest.createLocalDataStorageKey();
+      if (storageKey instanceof RamDiskStorageKey) {
+        const memory = Runtime.getRuntime().getRamDiskMemory();
+        memory.deserialize(entities, storageKey.unique);
+      }
+      // Note that we used to use a singleton entity ID (if present) instead of the hash. It seems
+      // cleaner not to rely on that.
+      if (!item.id) {
+        const entityHash = await digest(json);
+        id = `${id}:${entityHash}`;
+      }
       return manifest.newStore({type, name, id, storageKey, tags, originalId, claims,
         description: item.description, version: item.version || null, source: item.source,
         origin: item.origin, referenceMode: false, model: entities});

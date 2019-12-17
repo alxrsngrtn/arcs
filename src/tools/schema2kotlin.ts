@@ -14,6 +14,7 @@ import {SchemaNode} from './schema2graph.js';
 
 // https://kotlinlang.org/docs/reference/keyword-reference.html
 // [...document.getElementsByTagName('code')].map(x => x.innerHTML);
+// Includes reserve words for Entity Interface
 const keywords = [
   'as', 'as?', 'break', 'class', 'continue', 'do', 'else', 'false', 'for', 'fun', 'if', 'in', '!in', 'interface', 'is',
   '!is', 'null', 'object', 'package', 'return', 'super', 'this', 'throw', 'true', 'try', 'typealias', 'val', 'var',
@@ -21,14 +22,14 @@ const keywords = [
   'init', 'param', 'property', 'receiver', 'set', 'setparam', 'where', 'actual', 'abstract', 'annotation', 'companion',
   'const', 'crossinline', 'data', 'enum', 'expect', 'external', 'final', 'infix', 'inline', 'inner', 'internal',
   'lateinit', 'noinline', 'open', 'operator', 'out', 'override', 'private', 'protected', 'public', 'reified', 'sealed',
-  'suspend', 'tailrec', 'vararg', 'field', 'it'
+  'suspend', 'tailrec', 'vararg', 'field', 'it', 'internalId'
 ];
 
 const typeMap = {
-  'T': {type: 'String?', decodeFn: 'decodeText()'},
-  'U': {type: 'String?', decodeFn: 'decodeText()'},
-  'N': {type: 'Double?', decodeFn: 'decodeNum()'},
-  'B': {type: 'Boolean?', decodeFn: 'decodeBool()'},
+  'T': {type: 'String', decodeFn: 'decodeText()'},
+  'U': {type: 'String', decodeFn: 'decodeText()'},
+  'N': {type: 'Double', decodeFn: 'decodeNum()'},
+  'B': {type: 'Boolean', decodeFn: 'decodeBool()'},
   'R': {type: '', decodeFn: ''},
 };
 
@@ -42,6 +43,7 @@ export class Schema2Kotlin extends Schema2Base {
   fileHeader(outName: string): string {
     const withCustomPackage = (populate: string) => this.scope !== 'arcs' ? populate : '';
     return `\
+@file:Suppress("PackageName", "TopLevelName")
 package ${this.scope}
 
 //
@@ -49,10 +51,12 @@ package ${this.scope}
 //
 // Current implementation doesn't support references or optional field detection
 
-${withCustomPackage(`import arcs.Particle;
+${withCustomPackage(`import arcs.Particle
+import arcs.NullTermByteArray
 import arcs.Entity
 import arcs.StringEncoder
 import arcs.StringDecoder
+import arcs.utf8ToString
 `)}`;
   }
 
@@ -68,22 +72,22 @@ class KotlinGenerator implements ClassGenerator {
 
   constructor(readonly node: SchemaNode) {}
 
-  addField(field: string, typeChar: string, inherited: boolean) {
+  addField(field: string, typeChar: string) {
     const {type, decodeFn} = typeMap[typeChar];
     const fixed = field + (keywords.includes(field) ? '_' : '');
 
-    this.fields.push(`var ${fixed}: ${type} = null`);
+    this.fields.push(`var ${fixed}: ${type}`);
 
     this.decode.push(`"${field}" -> {`,
                      `  decoder.validate("${typeChar}")`,
                      `  this.${fixed} = decoder.${decodeFn}`,
                      `}`);
 
-    this.encode.push(`${fixed}?.let { encoder.encode("${field}:${typeChar}", it) }`);
+    this.encode.push(`${fixed}.let { encoder.encode("${field}:${typeChar}", it) }`);
   }
 
-  addReference(field: string, inherited: boolean, refName: string) {
-    throw new Error('TODO: support reference types in kotlin');
+  addReference(field: string, refName: string) {
+    // TODO: support reference types in kotlin
   }
 
   generate(fieldCount: number): string {
@@ -101,30 +105,30 @@ class KotlinGenerator implements ClassGenerator {
 
 ${withFields('data ')}class ${name}(${ withFields(`\n  ${this.fields.join(',\n  ')}\n`) }) : Entity<${name}>() {
 
-  override fun decodeEntity(encoded: String): ${name}? {
+  override fun decodeEntity(encoded: ByteArray): ${name}? {
     if (encoded.isEmpty()) return null
-    
-    val decoder = StringDecoder(encoded) 
+
+    val decoder = StringDecoder(encoded)
     internalId = decoder.decodeText()
     decoder.validate("|")
     ${withFields(`  for (_i in 0 until ${fieldCount}) {
-         if (decoder.done()) break 
-         val name = decoder.upTo(":")
+         if (decoder.done()) break
+         val name = decoder.upTo(':').utf8ToString()
          when (name) {
            ${this.decode.join('\n           ')}
          }
          decoder.validate("|")
         }
    `)}
-    
+
     return this
   }
 
-  override fun encodeEntity(): String {
+  override fun encodeEntity(): NullTermByteArray {
     val encoder = StringEncoder()
     encoder.encode("", internalId)
     ${this.encode.join('\n    ')}
-    return encoder.result()
+    return encoder.toNullTermByteArray()
   }
   ${withoutFields(`
   override fun toString(): String {

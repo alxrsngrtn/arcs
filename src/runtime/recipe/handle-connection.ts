@@ -20,8 +20,7 @@ import {acceptedDirections} from './recipe-util.js';
 import {TypeChecker} from './type-checker.js';
 import {compareArrays, compareComparables, compareStrings, Comparable} from './comparable.js';
 
-import {Direction, directionToArrow, preSlandlesDirectionToDirection} from '../manifest-ast-nodes.js';
-import {Flags} from '../flags.js';
+import {Direction} from '../manifest-ast-nodes.js';
 
 export class HandleConnection implements Comparable<HandleConnection> {
   private readonly _recipe: Recipe;
@@ -110,10 +109,10 @@ export class HandleConnection implements Comparable<HandleConnection> {
   }
 
   get isInput(): boolean {
-    return this.direction === 'in' || this.direction === 'inout';
+    return this.direction === 'reads' || this.direction === 'reads writes';
   }
   get isOutput(): boolean {
-    return this.direction === 'out' || this.direction === 'inout';
+    return this.direction === 'writes' || this.direction === 'reads writes';
   }
   get handle(): Handle|undefined { return this._handle; } // Handle?
   get particle() { return this._particle; } // never null
@@ -125,7 +124,7 @@ export class HandleConnection implements Comparable<HandleConnection> {
   }
 
   set direction(direction: Direction) {
-    if (direction as Direction === null) {
+    if (direction === null) {
       throw new Error(`Invalid direction '${direction}' for handle connection '${this.getQualifiedName()}'`);
     }
     this._direction = direction;
@@ -170,7 +169,7 @@ export class HandleConnection implements Comparable<HandleConnection> {
 
   _isValid(options: IsValidOptions): boolean {
     // Note: The following casts are necessary to catch invalid values that typescript does not manage to check).
-    if (this.direction as Direction === null || this.direction as Direction === undefined) {
+    if (this.direction === null || this.direction === undefined) {
       if (options && options.errors) {
         options.errors.set(this, `Invalid direction '${this.direction}' for handle connection '${this.getQualifiedName()}'`);
       }
@@ -275,13 +274,8 @@ export class HandleConnection implements Comparable<HandleConnection> {
 
   toString(nameMap: Map<RecipeComponent, string>, options: ToStringOptions): string {
     const result: string[] = [];
-    if (Flags.defaultToPreSlandlesSyntax) {
-      result.push(`${this.name || '*'}`); // TODO: Remove post slandles syntax
-      result.push(directionToArrow(this.direction));
-    } else {
-      result.push(`${this.name || '*'}:`);
-      result.push(preSlandlesDirectionToDirection(this.direction)); // TODO(jopra): support optionality.
-    }
+    result.push(`${this.name || '*'}:`);
+    result.push(this.direction); // TODO(jopra): support optionality.
     if (this.handle) {
       if (this.handle.immediateValue) {
         result.push(this.handle.immediateValue.name);

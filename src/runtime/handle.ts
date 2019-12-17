@@ -12,10 +12,9 @@ import {assert} from '../platform/assert-web.js';
 import {SystemException, UserException} from './arc-exceptions.js';
 import {ParticleSpec} from './particle-spec.js';
 import {Particle} from './particle.js';
-import {Reference} from './reference.js';
-import {SerializedEntity, StorageProxy} from './storage-proxy.js';
-import {BigCollectionType, CollectionType, EntityType, InterfaceType, ReferenceType} from './type.js';
-import {EntityClass, Entity} from './entity.js';
+import {ParticleExecutionContext} from '../runtime/particle-execution-context.js';
+import {BigCollectionType, CollectionType, EntityType, InterfaceType, ReferenceType, Type} from './type.js';
+import {EntityClass, Entity, SerializedEntity} from './entity.js';
 import {Store, SingletonStore, CollectionStore, BigCollectionStore} from './store.js';
 import {IdGenerator, Id} from './id.js';
 import {SYMBOL_INTERNALS} from './symbols.js';
@@ -57,6 +56,12 @@ function restore(entry: SerializedEntity, entityClass: EntityClass) {
 
 export interface HandleOptions {keepSynced: boolean; notifySync: boolean; notifyUpdate: boolean; notifyDesync: boolean;}
 
+type NoOpStorageAllocator = (id: string, type: Type) => Store;
+// The following must return a Reference, but we are trying to break the cyclic
+// dependency between this file and reference.ts, so we lose a little bit of type safety
+// to do that.
+type ReferenceMaker = (data: {id: string, storageKey: string | null}, type: ReferenceType, context: ParticleExecutionContext) => {};
+
 /**
  * Base class for Collections and Singletons.
  */
@@ -69,6 +74,9 @@ export abstract class HandleOld {
   readonly _particleId: string|null;
   readonly options: HandleOptions;
   entityClass: EntityClass|null;
+
+  static noOpStorageAllocator : NoOpStorageAllocator = null;
+  static makeReference : ReferenceMaker = null;
 
   abstract _notify(kind: string, particle: Particle, details: {});
 
@@ -156,12 +164,17 @@ export abstract class HandleOld {
    * storage proxy
    */
   disable(particle?: Particle): void {
-    if (this.storage instanceof StorageProxy) {
-      this.storage.deregister(particle, this);
+    // This used to check that storage is a StorageProxy, but we are trying
+    // to remove all references to StorageProxy to break cyclic dependencies.
+    // tslint:disable-next-line: no-any
+    if (typeof (this.storage as any).deregister === 'function') {
+      // tslint:disable-next-line: no-any
+      (this.storage as any).deregister(particle, this);
     }
     // Set this handle's storage to a no-operation storage proxy so any actions that need to be
     // taken by this handle in the future (due to some async operations) will do nothing and finish quietly
-    this._storage = StorageProxy.newNoOpProxy(this.storage.id, this.storage.type);
+    //this._storage = StorageProxy.newNoOpProxy(this.storage.id, this.storage.type);
+    this._storage = HandleOld.noOpStorageAllocator(this.storage.id, this.storage.type);
   }
 }
 
@@ -207,7 +220,7 @@ export class Collection extends HandleOld {
   /**
    * Returns the Entity specified by id contained by the handle, or null if this id is not
    * contained by the handle.
-   * @throws {Error} if this handle is not configured as a readable handle (i.e. 'in' or 'inout')
+   * @throws {Error} if this handle is not configured as a readable handle (i.e. 'reads' or 'reads writes')
    * in the particle's manifest.
    */
   async get(id: string) {
@@ -219,7 +232,7 @@ export class Collection extends HandleOld {
 
   /**
    * @returns a list of the Entities contained by the handle.
-   * @throws {Error} if this handle is not configured as a readable handle (i.e. 'in' or 'inout')
+   * @throws {Error} if this handle is not configured as a readable handle (i.e. 'reads' or 'reads writes')
    * in the particle's manifest.
    */
   async toList() {
@@ -238,14 +251,14 @@ export class Collection extends HandleOld {
       return list.map(e => restore(e, this.entityClass));
     }
     if (containedType instanceof ReferenceType) {
-      return list.map(r => new Reference(r, containedType, this.storage.pec));
+      return list.map(r => HandleOld.makeReference(r, containedType, this.storage.pec));
     }
     throw new Error(`Don't know how to deliver handle data of type ${this.type}`);
   }
 
   /**
    * Stores a new entity into the Handle.
-   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'out' or 'inout')
+   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'writes' or 'reads writes')
    * in the particle's manifest.
    */
   async store(entity: Storable) {
@@ -259,7 +272,7 @@ export class Collection extends HandleOld {
 
   /**
    * Removes all known entities from the Handle.
-   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'out' or 'inout')
+   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'writes' or 'reads writes')
    * in the particle's manifest.
    */
   async clear() {
@@ -275,7 +288,7 @@ export class Collection extends HandleOld {
 
   /**
    * Removes an entity from the Handle.
-   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'out' or 'inout')
+   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'writes' or 'reads writes')
    * in the particle's manifest.
    */
   async remove(entity: Storable) {
@@ -322,7 +335,7 @@ export class Singleton extends HandleOld {
 
   /**
    * @returns the Entity contained by the Singleton, or undefined if the Singleton is cleared.
-   * @throws {Error} if this Singleton is not configured as a readable handle (i.e. 'in' or 'inout')
+   * @throws {Error} if this Singleton is not configured as a readable handle (i.e. 'reads' or 'reads writes')
    * in the particle's manifest.
    */
   async get() {
@@ -344,14 +357,14 @@ export class Singleton extends HandleOld {
       return ParticleSpec.fromLiteral(model);
     }
     if (this.type instanceof ReferenceType) {
-      return new Reference(model, this.type, this.storage.pec);
+      return HandleOld.makeReference(model, this.type, this.storage.pec);
     }
     throw new Error(`Don't know how to deliver handle data of type ${this.type}`);
   }
 
   /**
    * Stores a new entity into the Singleton, replacing any existing entity.
-   * @throws {Error} if this Singleton is not configured as a writeable handle (i.e. 'out' or 'inout')
+   * @throws {Error} if this Singleton is not configured as a writeable handle (i.e. 'writes' or 'reads writes')
    * in the particle's manifest.
    */
   async set(entity: Storable) {
@@ -369,7 +382,7 @@ export class Singleton extends HandleOld {
 
   /**
    * Clears any entity currently in the Singleton.
-   * @throws {Error} if this Singleton is not configured as a writeable handle (i.e. 'out' or 'inout')
+   * @throws {Error} if this Singleton is not configured as a writeable handle (i.e. 'writes' or 'reads writes')
    * in the particle's manifest.
    */
   async clear() {
@@ -441,7 +454,7 @@ export class BigCollection extends HandleOld {
 
   /**
    * Stores a new entity into the Handle.
-   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'out' or 'inout')
+   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'writes' or 'reads writes')
    * in the particle's manifest.
    */
   async store(entity: Storable) {
@@ -455,7 +468,7 @@ export class BigCollection extends HandleOld {
 
   /**
    * Removes an entity from the Handle.
-   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'out' or 'inout')
+   * @throws {Error} if this handle is not configured as a writeable handle (i.e. 'writes' or 'reads writes')
    * in the particle's manifest.
    */
   async remove(entity: Entity) {
@@ -475,7 +488,7 @@ export class BigCollection extends HandleOld {
    * caveat that items removed during a streamed read may be returned at the end). Set `forward`
    * to false to return items in reverse insertion order.
    *
-   * @throws {Error} if this Singleton is not configured as a readable handle (i.e. 'in' or 'inout')
+   * @throws {Error} if this Singleton is not configured as a readable handle (i.e. 'reads' or 'reads writes')
    * in the particle's manifest.
    */
   async stream({pageSize, forward = true}: {pageSize: number, forward: boolean}) {
@@ -506,7 +519,7 @@ export function handleFor(storage: Store, idGenerator: IdGenerator, name: string
 
   const schema = storage.type.getEntitySchema();
   if (schema) {
-    handle.entityClass = schema.entityClass(storage.pec);
+    handle.entityClass = Entity.createEntityClass(schema, storage.pec);
   }
   return handle;
 }

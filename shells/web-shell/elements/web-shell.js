@@ -10,10 +10,11 @@
 
 import {linkJack} from '../../../modalities/dom/components/link-jack.js';
 import {generateId} from '../../../modalities/dom/components/generate-id.js';
+import {Runtime} from '../../../build/runtime/runtime.js';
+import {EntityType} from '../../../build/runtime/type.js';
 import {logsFactory} from '../../../build/platform/logs-factory.js';
 import {Const} from '../../configuration/constants.js';
 import {Xen} from '../../lib/components/xen.js';
-import {Utils} from '../../lib/utils.js';
 import '../../lib/elements/arc-element.js';
 import './web-config.js';
 import './web-context.js';
@@ -172,8 +173,7 @@ export class WebShell extends Xen.Debug(Xen.Async, log) {
     // capture anchor-clicks for SPA behavior
     linkJack(document, anchor => this.routeLink(anchor));
     // configure arcs environment
-    Utils.init(root);
-    return Utils.env;
+    return Runtime.init(root);
   }
   routeLink(anchor) {
     const url = new URL(anchor.href, document.location);
@@ -190,7 +190,7 @@ export class WebShell extends Xen.Debug(Xen.Async, log) {
     const {context, launcherArc, store} = this.state;
     if (context && launcherArc && !store) {
       const shareSchema = context.findSchemaByName('ArcMeta');
-      const store = launcherArc.findStoresByType(shareSchema.type.collectionOf()).pop();
+      const store = launcherArc.findStoresByType(new EntityType(shareSchema).collectionOf()).pop();
       if (store) {
         this.state = {store: store};
         store.on(info => this.state = {info});
@@ -207,7 +207,7 @@ export class WebShell extends Xen.Debug(Xen.Async, log) {
     this.state = {plan: suggestion.plan};
   }
   async configureContext() {
-    const precontext = await Utils.parse(manifests.context);
+    const precontext = await Runtime.parse(manifests.context);
     this.state = {
       precontext,
       contextConfig: {
