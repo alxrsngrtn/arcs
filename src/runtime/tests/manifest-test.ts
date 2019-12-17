@@ -514,6 +514,33 @@ ${particleStr1}
     const manifest = await Manifest.load('a', loader, {registry});
     verifyPrimitiveType(manifest.schemas.Bar.fields.value, 'Text');
   });
+  it('can import a schema defined in another manifest and use it in a particle', async () => {
+    const loader = new StubLoader({
+      a: `
+          import 'b'
+          particle People
+            input: reads [PersonDetails]`,
+      b: `
+          schema PersonDetails
+            name: Text
+            age: Number`
+    });
+    const manifest = await Manifest.load('a', loader);
+    const people = manifest.allParticles[0];
+    const personDetails = people.connections[0].type.getEntitySchema();
+    assert.deepEqual(
+      personDetails,
+      new Schema(['PersonDetails'], {
+        'name': {
+          kind: 'schema-primitive', refinement: null, type: 'Text',
+          location: {'start': {'line': 3, 'column': 19, 'offset': 50}, 'end': {'line': 3, 'column': 23, 'offset': 54}}
+          },
+        'age': {
+          kind: 'schema-primitive', refinement: null, type: 'Number',
+          location: {'start': {'line': 4, 'column': 18, 'offset': 72}, 'end': {'line': 4, 'column': 24, 'offset': 78}}
+        },
+        }));
+  });
   it('can find all imported recipes', async () => {
     const loader = new StubLoader({
       a: `
