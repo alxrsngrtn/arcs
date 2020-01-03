@@ -1,4 +1,6 @@
 import .bazelproject
 additional_languages:
   typescript
+  javascript
+
 
