@@ -81,6 +81,7 @@ Consider using the [IDE file chooser](https://intellij-support.jetbrains.com/hc/
 
 - Try increasing the [memory heap allocation](https://www.jetbrains.com/help/idea/increasing-memory-heap.html). 
 - Open the `.bazelproject` file. Comment out the targets or directories that are not relevant to your current task, then re-sync. 
+- Turn on the [`shared_sync` flag](https://ij.bazel.build/docs/project-views.html#shard_sync) in your `.bazelproject` file. 
 
 #### IDE shows `Unresolved Reference` for generated entities
 
