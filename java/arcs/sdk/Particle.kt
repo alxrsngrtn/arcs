@@ -11,6 +11,10 @@
 
 package arcs.sdk
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.consumeAsFlow
+
 /**
  * Base class for all Particles.
  */
@@ -191,8 +195,9 @@ abstract class Handle(val name: String, val particle: Particle) {
     init { particle.registerHandle(this) }
 
     var direction: Direction = Direction.Unconnected
-    abstract fun sync(encoded: ByteArray)
+    abstract suspend fun sync(encoded: ByteArray)
     abstract fun update(added: ByteArray, removed: ByteArray)
+    abstract fun asFlow(): Flow<*>
 }
 
 open class Singleton<T : Entity<T>>(
@@ -202,9 +207,12 @@ open class Singleton<T : Entity<T>>(
 ) : Handle(name, particle) {
 
     private var entity: T? = null
+    private val channel = Channel<T>()
 
-    override fun sync(encoded: ByteArray) {
+    override suspend fun sync(encoded: ByteArray)  {
         entity = entityCtor().decodeEntity(encoded)
+        if (entity == null) return
+        channel.send(entity as T)
     }
 
     override fun update(added: ByteArray, removed: ByteArray) = sync(added)
@@ -226,6 +234,9 @@ open class Singleton<T : Entity<T>>(
         entity = entityCtor()
         RuntimeClient.singletonClear(particle, this)
     }
+
+    override fun asFlow(): Flow<T> = channel.consumeAsFlow()
+
 }
 
 class Collection<T : Entity<T>>(
@@ -236,12 +247,14 @@ class Collection<T : Entity<T>>(
 
     private val entities: MutableMap<String, T> = mutableMapOf()
 
+    private val channel = Channel<Set<T>>()
+
     val size: Int
         get() = entities.size
 
     override fun iterator() = entities.values.iterator()
 
-    override fun sync(encoded: ByteArray) {
+    override suspend fun sync(encoded: ByteArray) {
         entities.clear()
         add(encoded)
     }
@@ -276,7 +289,7 @@ class Collection<T : Entity<T>>(
         }
     }
 
-    private fun add(added: ByteArray) {
+    private suspend fun add(added: ByteArray) {
         with(StringDecoder(added)) {
             repeat(getInt(':')) {
                 val len = getInt(':')
@@ -285,10 +298,13 @@ class Collection<T : Entity<T>>(
                 entities[entity.internalId] = entity
             }
         }
+        channel.send(entities.values.toSet())
     }
 
     fun clear() {
         entities.clear()
         RuntimeClient.collectionClear(particle, this)
     }
+
+    override fun asFlow(): Flow<Set<T>> = channel.consumeAsFlow()
 }
