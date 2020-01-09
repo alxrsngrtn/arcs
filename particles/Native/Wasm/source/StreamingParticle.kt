@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.combine
 import StreamingParticle.GameState
 import StreamingParticle.Move
 import StreamingParticle.Player
+import StreamingParticle.Events
 
 
 class StreamingParticle : Particle() {
@@ -17,6 +18,8 @@ class StreamingParticle : Particle() {
     private val move = Singleton { Move() }
     private val playerOne = Singleton { Player() }
     private val playerTwo = Singleton { Player() }
+    private val events = Collection { Events() }
+
 
     private val winningSequences = arrayOf(
             arrayOf(0, 1, 2),
@@ -29,8 +32,46 @@ class StreamingParticle : Particle() {
             arrayOf(2, 4, 6)
     )
 
+    private val defaultGame = GameState(
+            board = ",,,,,,,,",
+            currentPlayer = (0..1).random().toDouble(),
+            gameOver = false,
+            winnerAvatar = ""
+    )
+
     // Could be inside a main() function, etc.
     init {
+
+        // We can subscribe to single handles for initialization purposes.
+        // In this implementation, asFlow() is considered "hot"
+        playerOne.asFlow()
+                .filter { p -> p != null && p.id != 0.0 }
+                .collect { _ ->
+                   val newPlayer = Player(id=0.0)
+                   playerOne.set(newPlayer)
+                }
+        playerTwo.asFlow()
+                .filter { p -> p != null && p.id != 1.0 }
+                .collect { _ ->
+                    val newPlayer = Player(id=1.0)
+                    playerTwo.set(newPlayer)
+                }
+
+        // Flows can be saved as variables and combined / subscribed on later
+        val board = gameState.asFlow().map { gs -> gs.board.split(",").toMutableList() }
+
+
+        // This is a bit iffy, but there might be a way to add multiple subscribers to a flow to
+        // address existence vs nullability. I'm happy to yield to the latest thinking on how to
+        // handle this.
+        gameState.asFlow().combineLatest(events.asFlow())
+                .filter { gs, es -> gs == null || es.any { it.type == "reset" } }
+                .collect { gameState.set(defaultGame)}
+        gameState.asFlow()
+                .filter { gs -> !gs.gameOver }
+                .collect { gs ->
+                   // ...
+                }
 
 
         combine(gameState.asFlow(), playerOne.asFlow(), playerTwo.asFlow()).collect { gs, p1, p2 ->
