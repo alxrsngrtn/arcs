@@ -31,6 +31,11 @@ arcs_kt_schema(
     srcs = ["Harness.arcs"],
 )
 
+arcs_kt_schema(
+    name = "streaming_schemas",
+    srcs = ["Streaming.arcs"]
+)
+
 arcs_kt_particles(
     name = "service_particle",
     srcs = ["source/ServiceParticle.kt"],
@@ -42,6 +47,19 @@ arcs_kt_particles(
     srcs = ["source/TestParticle.kt"],
     package = "arcs.test",
     deps = [":wasm_schemas"],
+)
+
+arcs_kt_particles(
+    name = "streaming_particle",
+    srcs = ["source/StreamingParticle.kt"],
+    package = "arcs.test",
+    deps = [":streaming_schemas"]
+)
+
+arcs_manifest(
+    name = "streaming_manifest",
+    srcs = ["Streaming.arcs"],
+    deps = [":streaming_particle"],
 )
 
 arcs_manifest(
@@ -62,5 +80,6 @@ arcs_manifest_bundle(
     deps = [
         ":example_manifest",
         ":harness_manifest",
+        ":streaming_manifest",
     ],
 )
