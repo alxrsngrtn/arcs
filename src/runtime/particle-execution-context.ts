@@ -45,6 +45,8 @@ export type InnerArcHandle = {
   loadRecipe(recipe: string): Promise<{error?: string}>;
 };
 
+export const WasmLangs = ['.kt', '.cpp'];
+
 @SystemTrace
 export class ParticleExecutionContext implements StorageCommunicationEndpointProvider<CRDTTypeRecord> {
   private readonly apiPort : PECInnerPort;
@@ -316,7 +318,7 @@ export class ParticleExecutionContext implements StorageCommunicationEndpointPro
     ids.forEach(id => {
       const oldParticle = this.particles.get(id);
       if (oldParticle.spec.implBlobUrl) delete oldParticle.spec.implBlobUrl;
-      if (oldParticle.spec.implFile.endsWith('.wasm') && this.wasmContainers[oldParticle.spec.implFile]) {
+      if (WasmLangs.some(ext => oldParticle.spec.implFile.endsWith(ext)) && this.wasmContainers[oldParticle.spec.implFile]) {
         // For WASM particles the container will be re-instantiated along with all of the particles
         this.wasmContainers[oldParticle.spec.implFile] = undefined;
       }
@@ -399,7 +401,7 @@ export class ParticleExecutionContext implements StorageCommunicationEndpointPro
 
   private async createParticleFromSpec(id: string, spec: ParticleSpec): Promise<Particle> {
     let particle: Particle;
-    if (spec.implFile && spec.implFile.endsWith('.wasm')) {
+    if (spec.implFile && WasmLangs.some(ext => spec.implFile.endsWith(ext))) {
       particle = await this.loadWasmParticle(id, spec);
       particle.setCapabilities(this.capabilities(false));
     } else {
