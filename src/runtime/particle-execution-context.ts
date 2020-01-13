@@ -45,7 +45,7 @@ export type InnerArcHandle = {
   loadRecipe(recipe: string): Promise<{error?: string}>;
 };
 
-export const WasmLangs = ['.kt', '.cpp'];
+export const WasmLangs = ['.kt', '.cpp', '.cc'];
 
 @SystemTrace
 export class ParticleExecutionContext implements StorageCommunicationEndpointProvider<CRDTTypeRecord> {
