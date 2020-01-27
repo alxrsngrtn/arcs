@@ -157,6 +157,19 @@ fun updateHandle(
 }
 
 @Retain
+@ExportForCppRuntime("_dereferenceResponse")
+fun dereferenceResponse(
+    particlePtr: WasmAddress,
+    continuationId: Int,
+    encodedPtr: WasmString
+) {
+    particlePtr.toObject<WasmParticleImpl>()?.dereferenceResponse(
+        continuationId,
+        encodedPtr.toKString()
+    )
+}
+
+@Retain
 @ExportForCppRuntime("_renderSlot")
 fun renderSlot(
     particlePtr: WasmAddress,
@@ -229,6 +242,17 @@ external fun collectionRemove(
     handlePtr: WasmAddress,
     stringPtr: WasmString
 )
+
+
+@SymbolName("_dereference")
+external fun dereference(
+    particlePtr: WasmAddress,
+    id: WasmString,
+    key: WasmString,
+    schemaHash: WasmString,
+    continuationId: Int
+)
+
 
 @SymbolName("_collectionClear")
 external fun collectionClear(particlePtr: WasmAddress, handlePtr: WasmAddress)

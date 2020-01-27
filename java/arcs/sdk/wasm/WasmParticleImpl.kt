@@ -13,6 +13,9 @@ package arcs.sdk.wasm
 
 import arcs.sdk.Handle
 import arcs.sdk.Particle
+import kotlin.native.concurrent.AtomicInt
+
+typealias DerefContinuation = (encoding: String) -> Unit
 
 /**
  * Base class for all wasm particles.
@@ -21,6 +24,8 @@ abstract class WasmParticleImpl : Particle {
     private val handles: MutableMap<String, Handle> = mutableMapOf()
     private val toSync: MutableSet<Handle> = mutableSetOf()
     private val eventHandlers: MutableMap<String, (Map<String, String>) -> Unit> = mutableMapOf()
+    private val continuationId = AtomicInt(0)
+    private val continuations: MutableMap<Int, DerefContinuation> = mutableMapOf()
 
     /** Execute on initialization of Particle. */
     open fun init() = Unit
@@ -108,6 +113,16 @@ abstract class WasmParticleImpl : Particle {
     @Suppress("UNUSED_PARAMETER")
     fun renderSlot(slotName: String, sendTemplate: Boolean = true, sendModel: Boolean = true) {
         log("ignoring renderSlot")
+    }
+
+    fun dereference() {
+
+    }
+
+    /** Called by the runtime in response to a dereference() call. */
+    fun dereferenceResponse(continuationId: Int, encoded: String) {
+        continuations[continuationId]?.let { it(encoded) }
+        continuations.remove(continuationId)
     }
 
     /**
