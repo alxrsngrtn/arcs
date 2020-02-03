@@ -60,6 +60,18 @@ abstract class WasmParticleImpl : Particle {
         return null
     }
 
+
+    /**
+     * React to handle updates.
+     *
+     * Called for handles when change events are received from the backing store.
+     *
+     * Renders by default for wasm, no-op on Jvm
+     *
+     * @param handle Singleton or Collection handle
+     */
+    override fun onHandleUpdate(handle: Handle) = renderOutput()
+
     /**
      * Register a reaction to an event.
      *

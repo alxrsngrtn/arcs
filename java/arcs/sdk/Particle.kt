@@ -18,6 +18,8 @@ interface Particle {
      *
      * Called for handles when change events are received from the backing store.
      *
+     * Renders by default for wasm, no-op on Jvm
+     *
      * @param handle Singleton or Collection handle
      */
     fun onHandleUpdate(handle: Handle) = Unit
