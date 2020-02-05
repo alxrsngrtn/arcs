@@ -22,8 +22,8 @@ abstract class WasmParticleImpl : Particle {
     private val toSync: MutableSet<Handle> = mutableSetOf()
     private val eventHandlers: MutableMap<String, (Map<String, String>) -> Unit> = mutableMapOf()
 
-    /** Execute on initialization of Particle; renders by default.*/
-    open fun init() = renderOutput()
+    /** Execute on initialization of Particle. */
+    open fun init() = Unit
 
     /**
      * Called during Handle construction to build the handles map.
@@ -59,6 +59,18 @@ abstract class WasmParticleImpl : Particle {
         log("Handle $name not registered")
         return null
     }
+
+
+    /**
+     * React to handle updates.
+     *
+     * Called for handles when change events are received from the backing store.
+     *
+     * Renders by default for wasm, no-op on Jvm
+     *
+     * @param handle Singleton or Collection handle
+     */
+    override fun onHandleUpdate(handle: Handle) = renderOutput()
 
     /**
      * Register a reaction to an event.

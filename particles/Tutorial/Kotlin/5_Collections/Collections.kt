@@ -11,8 +11,6 @@
 
 package arcs.tutorials
 
-import arcs.sdk.Handle
-
 /**
  * Sample Kotlin-WASM Particle to use a JSON store.
  */
@@ -39,9 +37,5 @@ class Collections : AbstractCollections() {
           <!-- This template is given a model object. It can access the properties on that model via the usual placeholder syntax. -->
           <li>Hello <span>{{name}}</span>, age <span>{{age}}</span>!</li>
         </template>"""
-    }
-
-    override fun onHandleUpdate(handle: Handle) {
-      renderOutput()
     }
 }
