@@ -12,6 +12,7 @@
 package arcs.jvm.storage.database.testutil
 
 import arcs.core.crdt.internal.VersionMap
+import arcs.core.data.Schema
 import arcs.core.storage.StorageKey
 import arcs.core.storage.database.Database
 import arcs.core.storage.database.DatabaseClient
@@ -22,6 +23,7 @@ import kotlin.coroutines.coroutineContext
 import kotlin.reflect.KClass
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -69,7 +71,8 @@ open class MockDatabase : Database {
         }
 
         if (isNew) {
-            clientFlow.onEach { it.onDatabaseUpdate(data, version, originatingClientId) }
+            clientFlow.filter { it.storageKey == storageKey }
+                .onEach { it.onDatabaseUpdate(data, version, originatingClientId) }
                 .launchIn(CoroutineScope(coroutineContext))
         }
 
@@ -79,7 +82,8 @@ open class MockDatabase : Database {
     @Suppress("UNCHECKED_CAST")
     override suspend fun get(
         storageKey: StorageKey,
-        dataType: KClass<out DatabaseData>
+        dataType: KClass<out DatabaseData>,
+        schema: Schema
     ): DatabaseData? {
         val dataVal = dataMutex.withLock { data[storageKey] }
 

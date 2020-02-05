@@ -589,74 +589,76 @@ ${particleStr1}
     verify(manifest);
     verify(await parseManifest(manifest.toString()));
   });
-  it('can construct manifest containing schema with refinement types', async () => {
-    const manifest = await parseManifest(`
-      schema Foo
-        num: Number [num < 5]`);
-    const verify = (manifest: Manifest) => {
-      const ref = manifest.schemas.Foo.fields.num.refinement;
-      assert.strictEqual(ref.kind, 'refinement');
-      assert.isTrue(ref.expression instanceof BinaryExpression);
-      assert.strictEqual(ref.expression.leftExpr.value, 'num');
-      assert.strictEqual(ref.expression.rightExpr.value, 5);
-      assert.strictEqual(ref.expression.operator.op, '<');
-    };
-    verify(manifest);
-    verify(await parseManifest(manifest.toString()));
-  });
-  it('can construct manifest with particles using already defined schema (with refinements)', async () => {
-    const manifest = await parseManifest(`
-    schema Person
-      name: Text
-      id: Text
-      age: Number [age > 0]
-    schema Ordered
-      index: Number [index >= 0]
-    particle OrderPeople in 'OrderPeople.js'
-      orderedPeople: writes [Ordered Person {name, id, index}]`);
-    const verify = (manifest: Manifest) => {
-      const entity = manifest.particles[0].handleConnectionMap.get('orderedPeople').type['collectionType'];
-      assert.strictEqual(entity.tag, 'Entity');
-      // tslint:disable-next-line: no-any
-      const ref = (entity as any).getEntitySchema().refinement;
-      assert.isNull(ref);
-      // tslint:disable-next-line: no-any
-      const refIndex = (entity as any).getEntitySchema().fields['index'].refinement;
-      assert.exists(refIndex);
-      assert.strictEqual(refIndex.kind, 'refinement');
-      assert.isTrue(refIndex.expression instanceof BinaryExpression);
-      assert.strictEqual(refIndex.expression.operator.op, '>=');
-      assert.isTrue(refIndex.expression.leftExpr instanceof FieldNamePrimitive);
-      assert.strictEqual(refIndex.expression.leftExpr.value, 'index');
-      assert.isTrue(refIndex.expression.rightExpr instanceof NumberPrimitive);
-      assert.strictEqual(refIndex.expression.rightExpr.value, 0);
-    };
-    verify(manifest);
-  });
-  it('can construct manifest containing a particle with refinement types', async () => {
-    const manifest = await parseManifest(`
-    particle Foo
-      input: reads Something {value: Number [value > 0], price: Number [price > 0]} [value > 10 and price < 2]`);
-    const verify = (manifest: Manifest) => {
-      const entity = manifest.particles[0].handleConnectionMap.get('input').type;
-      assert.strictEqual(entity.tag, 'Entity');
-      // tslint:disable-next-line: no-any
-      const ref = (entity as any).getEntitySchema().refinement;
-      assert.exists(ref);
-      assert.strictEqual(ref.kind, 'refinement');
-      assert.isTrue(ref.expression instanceof BinaryExpression);
-      assert.strictEqual(ref.expression.operator.op, 'and');
-      assert.isTrue(ref.expression.leftExpr instanceof BinaryExpression);
-      assert.strictEqual(ref.expression.leftExpr.operator.op, '>');
-      assert.strictEqual(ref.expression.leftExpr.leftExpr.value, 'value');
-      assert.strictEqual(ref.expression.leftExpr.rightExpr.value, 10);
-      assert.isTrue(ref.expression.rightExpr instanceof BinaryExpression);
-      assert.strictEqual(ref.expression.rightExpr.operator.op, '<');
-      assert.strictEqual(ref.expression.rightExpr.leftExpr.value, 'price');
-      assert.strictEqual(ref.expression.rightExpr.rightExpr.value, 2);
-    };
-    verify(manifest);
-    verify(await parseManifest(manifest.toString()));
+  describe('refinement types', async () => {
+    it('can construct manifest containing schema with refinement types', async () => {
+      const manifest = await parseManifest(`
+        schema Foo
+          num: Number [num < 5]`);
+      const verify = (manifest: Manifest) => {
+        const ref = manifest.schemas.Foo.fields.num.refinement;
+        assert.strictEqual(ref.kind, 'refinement');
+        assert.isTrue(ref.expression instanceof BinaryExpression);
+        assert.strictEqual(ref.expression.leftExpr.value, 'num');
+        assert.strictEqual(ref.expression.rightExpr.value, 5);
+        assert.strictEqual(ref.expression.operator.op, '<');
+      };
+      verify(manifest);
+      verify(await parseManifest(manifest.toString()));
+    });
+    it('can construct manifest with particles using already defined schema (with refinements)', async () => {
+      const manifest = await parseManifest(`
+      schema Person
+        name: Text
+        id: Text
+        age: Number [age > 0]
+      schema Ordered
+        index: Number [index >= 0]
+      particle OrderPeople in 'OrderPeople.js'
+        orderedPeople: writes [Ordered Person {name, id, index}]`);
+      const verify = (manifest: Manifest) => {
+        const entity = manifest.particles[0].handleConnectionMap.get('orderedPeople').type['collectionType'];
+        assert.strictEqual(entity.tag, 'Entity');
+        // tslint:disable-next-line: no-any
+        const ref = (entity as any).getEntitySchema().refinement;
+        assert.isNull(ref);
+        // tslint:disable-next-line: no-any
+        const refIndex = (entity as any).getEntitySchema().fields['index'].refinement;
+        assert.exists(refIndex);
+        assert.strictEqual(refIndex.kind, 'refinement');
+        assert.isTrue(refIndex.expression instanceof BinaryExpression);
+        assert.strictEqual(refIndex.expression.operator.op, '>=');
+        assert.isTrue(refIndex.expression.leftExpr instanceof FieldNamePrimitive);
+        assert.strictEqual(refIndex.expression.leftExpr.value, 'index');
+        assert.isTrue(refIndex.expression.rightExpr instanceof NumberPrimitive);
+        assert.strictEqual(refIndex.expression.rightExpr.value, 0);
+      };
+      verify(manifest);
+    });
+    it('can construct manifest containing a particle with refinement types', async () => {
+      const manifest = await parseManifest(`
+      particle Foo
+        input: reads Something {value: Number [value > 0], price: Number [price > 0]} [value > 10 and price < 2]`);
+      const verify = (manifest: Manifest) => {
+        const entity = manifest.particles[0].handleConnectionMap.get('input').type;
+        assert.strictEqual(entity.tag, 'Entity');
+        // tslint:disable-next-line: no-any
+        const ref = (entity as any).getEntitySchema().refinement;
+        assert.exists(ref);
+        assert.strictEqual(ref.kind, 'refinement');
+        assert.isTrue(ref.expression instanceof BinaryExpression);
+        assert.strictEqual(ref.expression.operator.op, 'and');
+        assert.isTrue(ref.expression.leftExpr instanceof BinaryExpression);
+        assert.strictEqual(ref.expression.leftExpr.operator.op, '>');
+        assert.strictEqual(ref.expression.leftExpr.leftExpr.value, 'value');
+        assert.strictEqual(ref.expression.leftExpr.rightExpr.value, 10);
+        assert.isTrue(ref.expression.rightExpr instanceof BinaryExpression);
+        assert.strictEqual(ref.expression.rightExpr.operator.op, '<');
+        assert.strictEqual(ref.expression.rightExpr.leftExpr.value, 'price');
+        assert.strictEqual(ref.expression.rightExpr.rightExpr.value, 2);
+      };
+      verify(manifest);
+      verify(await parseManifest(manifest.toString()));
+    });
   });
 
   describe('relaxed reads and writes', async () => {
@@ -675,11 +677,11 @@ ${particleStr1}
           foo: reads Thing
 
         recipe SomeRecipe
-          myFoo: create *
+          myFoo: create * // [NotAThing {} or Thing {}]
           PA
-            foo: writes someof myFoo
+            foo: writes myFoo
           PB
-            foo: writes someof myFoo
+            foo: writes myFoo
           PC
             foo: reads someof myFoo
       `);
@@ -690,15 +692,17 @@ ${particleStr1}
       const particleA = recipe.particles[0];
       assert.sameMembers(Object.keys(particleA.connections), ['foo']);
       const handleA = particleA.connections['foo'];
-      assert(handleA.relaxed, 'handle PA.foo should be relaxed');
+      assert(!handleA.relaxed, 'handle PA.foo should not be relaxed');
       const particleB = recipe.particles[1];
       assert.sameMembers(Object.keys(particleB.connections), ['foo']);
       const handleB = particleB.connections['foo'];
-      assert(handleB.relaxed, 'handle PB.foo should be relaxed');
+      assert(!handleB.relaxed, 'handle PB.foo should not be relaxed');
       const particleC = recipe.particles[2];
       assert.sameMembers(Object.keys(particleC.connections), ['foo']);
       const handleC = particleC.connections['foo'];
       assert(handleC.relaxed, 'handle PC.foo should be relaxed');
+      assert(recipe.normalize(), 'should be able to normalize recipe');
+      assert(recipe.isResolved(), 'should be able to resolve recipe');
     });
     it('can round trip a manifest containing relaxed reads', async () => {
       const manifestStr = `schema Thing
