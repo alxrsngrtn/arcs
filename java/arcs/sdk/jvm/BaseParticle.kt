@@ -12,4 +12,6 @@
 package arcs.sdk
 
 /** Implementation of [Particle] for the JVM. */
-abstract class BaseParticle : Particle
+abstract class BaseParticle : Particle {
+  open fun init() = Unit
+}
