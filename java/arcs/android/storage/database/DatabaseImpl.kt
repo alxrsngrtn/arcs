@@ -45,7 +45,14 @@ import arcs.core.util.performance.Counters
 import arcs.core.util.performance.PerformanceStatistics
 import arcs.jvm.util.performance.JvmTimer
 import com.google.protobuf.ByteString
+import kotlin.coroutines.coroutineContext
 import kotlin.reflect.KClass
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -69,7 +76,7 @@ typealias ReferenceId = Long
 
 /** Implementation of [Database] for Android using SQLite. */
 @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
-@Suppress("Recycle") // Our helper extension methods close Cursors correctly.
+@Suppress("Recycle", "EXPERIMENTAL_API_USAGE") // Our helper extension methods close Cursors correctly.
 class DatabaseImpl(
     context: Context,
     databaseName: String,
@@ -81,7 +88,6 @@ class DatabaseImpl(
     /* cursorFactory = */ null,
     DB_VERSION
 ) {
-    private val mutex = Mutex()
     // TODO: handle rehydrating from a snapshot.
     private val stats = DatabasePerformanceStatistics(
         insertUpdate = PerformanceStatistics(JvmTimer, *DatabaseCounters.INSERT_UPDATE_COUNTERS),
@@ -89,8 +95,15 @@ class DatabaseImpl(
         delete = PerformanceStatistics(JvmTimer, *DatabaseCounters.DELETE_COUNTERS)
     )
 
+    private val schemaMutex = Mutex()
     /** Maps from schema hash to type ID (local copy of the 'types' table). */
-    private val schemaTypeMap by guardedBy(mutex, ::loadTypes)
+    private val schemaTypeMap by guardedBy(schemaMutex, ::loadTypes)
+
+    private val clientMutex = Mutex()
+    private var nextClientId by guardedBy(clientMutex, 1)
+    private val clients by guardedBy(clientMutex, mutableMapOf<Int, DatabaseClient>())
+    private val clientFlow: Flow<DatabaseClient> =
+        flow { clientMutex.withLock { clients.values }.forEach { emit(it) } }
 
     override fun onCreate(db: SQLiteDatabase) = db.transaction {
         CREATE.forEach(db::execSQL)
@@ -111,12 +124,14 @@ class DatabaseImpl(
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-    override fun addClient(client: DatabaseClient): Int {
-        TODO("not implemented")
+    override suspend fun addClient(client: DatabaseClient): Int = clientMutex.withLock {
+        clients[nextClientId] = client
+        nextClientId++
     }
 
-    override fun removeClient(identifier: Int) {
-        TODO("not implemented")
+    override suspend fun removeClient(identifier: Int) = clientMutex.withLock {
+        clients.remove(nextClientId)
+        Unit
     }
 
     override suspend fun get(
@@ -172,7 +187,9 @@ class DatabaseImpl(
             val storageKeyId = it.getLong(0)
             val schemaTypeId = it.getLong(1)
             val entityId = it.getString(3)
-            val versionMap = it.getVersionMap(4)
+            val versionMap = requireNotNull(it.getVersionMap(4)) {
+                "No VersionMap available for Entity at $storageKey"
+            }
             val versionNumber = it.getInt(5)
             // Fetch the entity's fields.
             counters?.increment(DatabaseCounters.GET_ENTITY_FIELDS)
@@ -219,6 +236,8 @@ class DatabaseImpl(
             counters?.increment(DatabaseCounters.GET_ENTITY_FIELD_VALUE_PRIMITIVE)
             getPrimitiveValue(fieldValueId, field.typeId, db, counters)
         }
+        // TODO: This should look for a "singleton" collection entry. Maybe use the primitive
+        //  case first, then the else can handle collections and singletons of references.
         else -> {
             counters?.increment(DatabaseCounters.GET_ENTITY_FIELD_VALUE_REFERENCE)
             getReferenceValue(fieldValueId, db)
@@ -314,6 +333,10 @@ class DatabaseImpl(
         }
         // TODO: Return a proper database version number.
         return@timeSuspending 1
+    }.also { newVersion ->
+        clientFlow.filter { it.storageKey == storageKey }
+            .onEach { it.onDatabaseUpdate(data, newVersion, originatingClientId) }
+            .launchIn(CoroutineScope(coroutineContext))
     }
 
     @VisibleForTesting
@@ -573,6 +596,10 @@ class DatabaseImpl(
         originatingClientId: Int?
     ) = writableDatabase.use {
         delete(storageKey, originatingClientId, it)
+    }.also {
+        clientFlow.filter { it.storageKey == storageKey }
+            .onEach { it.onDatabaseDelete(originatingClientId) }
+            .launchIn(CoroutineScope(coroutineContext))
     }
 
     @Suppress("UNUSED_PARAMETER") // TODO: use originatingClientId
@@ -644,7 +671,7 @@ class DatabaseImpl(
         schema: Schema,
         db: SQLiteDatabase,
         counters: Counters? = null
-    ): TypeId = mutex.withLock {
+    ): TypeId = schemaMutex.withLock {
         schemaTypeMap[schema.hash]?.let {
             counters?.increment(DatabaseCounters.ENTITY_SCHEMA_CACHE_HIT)
             return@withLock it
@@ -773,18 +800,30 @@ class DatabaseImpl(
         counters: Counters? = null
     ): ReferenceId = db.transaction {
         counters?.increment(DatabaseCounters.GET_ENTITY_REFERENCE)
-        val refId = rawQuery(
+        val withoutVersionMap =
+            """
+                SELECT id
+                FROM entity_refs
+                WHERE entity_id = ? AND backing_storage_key = ?
+            """.trimIndent() to arrayOf(
+                reference.id,
+                reference.storageKey.toString()
+            )
+        val withVersionMap =
             """
                 SELECT id
                 FROM entity_refs
                 WHERE entity_id = ? AND backing_storage_key = ? AND version_map = ?
-            """.trimIndent(),
-            arrayOf(
+            """.trimIndent() to arrayOf(
                 reference.id,
                 reference.storageKey.toString(),
-                reference.version.toProtoLiteral()
+                reference.version?.toProtoLiteral()
             )
-        ).forSingleResult { it.getLong(0) }
+
+        val refId = (reference.version?.let { withVersionMap } ?: withoutVersionMap)
+            .let { rawQuery(it.first, it.second) }
+            .forSingleResult { it.getLong(0) }
+
         refId ?: run {
             counters?.increment(DatabaseCounters.INSERT_ENTITY_REFERENCE)
             insertOrThrow(
@@ -793,7 +832,11 @@ class DatabaseImpl(
                 ContentValues().apply {
                     put("entity_id", reference.id)
                     put("backing_storage_key", reference.storageKey.toString())
-                    put("version_map", reference.version.toProtoLiteral())
+                    reference.version?.let {
+                        put("version_map", it.toProtoLiteral())
+                    } ?: run {
+                        putNull("version_map")
+                    }
                 }
             )
         }
@@ -823,7 +866,9 @@ class DatabaseImpl(
             require(dataType == expectedDataType) {
                 "Expected storage key $storageKey to be a $expectedDataType but was a $dataType."
             }
-            val versionMap = it.getVersionMap(2)
+            val versionMap = requireNotNull(it.getVersionMap(2)) {
+                "Expected a version map for the collection at $storageKey"
+            }
             val versionNumber = it.getInt(3)
             CollectionMetadata(collectionId, versionMap, versionNumber)
         }
@@ -1032,7 +1077,7 @@ class DatabaseImpl(
 
     /** Test-only version of [getTypeId]. */
     @VisibleForTesting
-    suspend fun getTypeIdForTest(fieldType: FieldType) = mutex.withLock {
+    suspend fun getTypeIdForTest(fieldType: FieldType) = schemaMutex.withLock {
         getTypeId(fieldType, schemaTypeMap)
     }
 
@@ -1078,7 +1123,9 @@ class DatabaseImpl(
     private fun VersionMap.toProtoLiteral() = toProto().toByteString().toStringUtf8()
 
     /** Parses a [VersionMap] out of the [Cursor] for the given column. */
-    private fun Cursor.getVersionMap(column: Int): VersionMap {
+    private fun Cursor.getVersionMap(column: Int): VersionMap? {
+        if (isNull(column)) return null
+
         val str = getString(column)
         val bytes = ByteString.copyFromUtf8(str)
         val proto = VersionMapProto.parseFrom(bytes)
@@ -1161,8 +1208,8 @@ class DatabaseImpl(
                     entity_id TEXT NOT NULL,
                     -- The storage key for the backing store for this entity.
                     backing_storage_key TEXT NOT NULL,
-                    -- Serialized VersionMapProto for the reference.
-                    version_map TEXT NOT NULL
+                    -- Serialized VersionMapProto for the reference, if available.
+                    version_map TEXT
                 );
 
                 CREATE INDEX entity_refs_index ON entity_refs (

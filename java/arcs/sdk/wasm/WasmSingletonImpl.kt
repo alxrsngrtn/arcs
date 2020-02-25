@@ -38,7 +38,10 @@ class WasmSingletonImpl<T : WasmEntity>(
 
     fun fetch() = entity
 
-    fun set(entity: T) {
+    /** TODO(heimlich): remove this once all particles are changed. */
+    fun set(entity: T) = store(entity)
+
+    fun store(entity: T) {
         this.entity = entity
         val encoded = entity.encodeEntity()
         WasmRuntimeClient.singletonSet(particle, this, encoded)
