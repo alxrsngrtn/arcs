@@ -7,11 +7,11 @@ import arcs.core.data.RecipeProto
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 
-class PlanGenerator(private val fileBuilder: FileSpec.Builder) {
+class PlanGenerator(private val recipeEnvelopeProto: RecipeEnvelopeProto) : Generator<FileSpec.Builder>  {
 
     /** Generate code from a Recipe proto. */
-    fun generate(recipeEnvelopeProto: RecipeEnvelopeProto) {
-        fileBuilder.addType(
+    override fun generate(builder: FileSpec.Builder) {
+        builder.addType(
             generatePlan(recipeEnvelopeProto.recipe)
                 .build()
         )
