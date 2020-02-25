@@ -5,7 +5,12 @@ package(default_visibility = ["//visibility:public"])
 
 kt_jvm_library(
     name = "generator",
-    srcs = ["Recipe2Plan.kt", "PlanGenerator.kt"],
+    srcs = [
+        "Generator.kt",
+        "PlanGenerator.kt",
+        "Recipe2Plan.kt",
+        "SchemaGenerator.kt"
+    ],
     deps = [
         "//java/arcs/core/data",
         "//java/arcs/core/data:recipe_android_proto",
