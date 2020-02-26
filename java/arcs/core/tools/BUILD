@@ -8,6 +8,7 @@ kt_jvm_library(
     srcs = [
         "Generator.kt",
         "PlanGenerator.kt",
+        "ProtoVisitor.kt",
         "Recipe2Plan.kt",
         "SchemaGenerator.kt"
     ],

@@ -33,8 +33,9 @@ class Recipe2Plan : CliktCommand(
         val recipeEnvelopeProto = RecipeEnvelopeProto.parseFrom(manifest.readBytes())
         val fileBuilder = FileSpec.builder(packageName, "")
 
-        val generator = PlanGenerator(recipeEnvelopeProto)
-        generator.generate(fileBuilder)
+        val test = ProtoTest(recipeEnvelopeProto).run()
+
+        echo(test)
 
         outputFile.writeText(fileBuilder.build().toString())
     }
