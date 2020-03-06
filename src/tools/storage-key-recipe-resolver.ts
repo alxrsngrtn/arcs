@@ -68,7 +68,11 @@ export class StorageKeyRecipeResolver {
     if (!successful) return null;
     if (normalized.isResolved()) return normalized;
 
-    return await (new RecipeResolver(arc).resolve(recipe, opts));
+    const resolved = await (new RecipeResolver(arc).resolve(recipe, opts));
+
+    if (!Object.isFrozen(resolved)) return null;
+
+    return resolved;
   }
 
   /** Returns the arcId from annotations on the recipe when present. */

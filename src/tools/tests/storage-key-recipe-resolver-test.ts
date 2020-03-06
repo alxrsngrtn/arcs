@@ -144,8 +144,7 @@ describe('recipe2plan', () => {
         data: reads data`);
 
       const resolver = new StorageKeyRecipeResolver(manifest);
-      // TODO: specify the correct error to be thrown
-      await assertThrowsAsync(resolver.resolve);
+      await assertThrowsAsync(async () => await resolver.resolve(), /Recipe ReadingRecipe failed to resolve/);
     });
     // TODO(alxr): Flush out outlined unit tests
     it.skip('No arc id: If arcId of WritingRecipe is not there, it is not valid', () => {
