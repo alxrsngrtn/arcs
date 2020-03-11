@@ -15,6 +15,7 @@ import {HandleConnection} from '../runtime/recipe/handle-connection.js';
 import {Direction} from '../runtime/manifest-ast-nodes.js';
 import {Handle} from '../runtime/recipe/handle.js';
 import {Dictionary} from '../runtime/hot.js';
+import {findLongRunningArcId} from './storage-key-recipe-resolver.js';
 
 const ktUtils = new KotlinGenerationUtils();
 
@@ -48,6 +49,7 @@ export class PlanGenerator {
     const plans: string[] = [];
     for (const recipe of this.resolvedRecipes) {
       const planName = `${recipe.name}Plan`;
+      const arcId = findLongRunningArcId(recipe);
 
       const particles: string[] = [];
       for (const particle of recipe.particles) {
@@ -56,7 +58,10 @@ export class PlanGenerator {
       }
 
       const start = `object ${planName} : `;
-      const plan = `${start}${ktUtils.applyFun('Plan', [ktUtils.listOf(particles)], start.length)}`;
+      const plan = `${start}${ktUtils.applyFun('Plan', [
+        ktUtils.listOf(particles),
+        arcId ? quote(arcId) : 'null',
+      ], start.length)}`;
       plans.push(plan);
     }
     return plans;
