@@ -91,8 +91,9 @@ export class StorageKeyRecipeResolver {
         assert(createHandle.type.maybeEnsureResolved());
         assert(createHandle.type.isResolved());
       }
-      const storageKey = await resolver.createStorageKey(
-          createHandle.capabilities, createHandle.type.getEntitySchema(), createHandle.id);
+      const entity = createHandle.type.getEntitySchema();
+      if (!entity) continue;
+      const storageKey = await resolver.createStorageKey(createHandle.capabilities, entity, createHandle.id);
       const store = new Store(createHandle.type, {storageKey, exists: Exists.MayExist, id: createHandle.id});
       arc.context.registerStore(store, createHandle.tags);
     }
