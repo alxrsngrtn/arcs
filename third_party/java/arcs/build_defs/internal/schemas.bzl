@@ -180,7 +180,7 @@ arcs_ts_preprocessing = rule(
     attrs = {
         "srcs": attr.label_list(allow_files = [".ts", ".d.ts"]),
     },
-    doc = """Converts to node platforms for the arcs ts runtime.""",
+    doc = """Processes Arcs TypeScript sources to refer to node variants of the dependencies in the platform/ directory.""",
 )
 
 def _schema2pkg_impl(ctx):
