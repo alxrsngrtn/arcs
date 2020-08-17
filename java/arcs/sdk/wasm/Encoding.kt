@@ -56,6 +56,9 @@ class StringDecoder(private var bytes: ByteArray) {
 
     fun decodeNum(): Double = upTo(':').toUtf8String().toDouble()
 
+    fun decodeBigInt(): String =
+        throw NotImplementedError("No JS to Kotlin encoding exists for Kotlin BigInteger")
+
     fun decodeBool(): Boolean = chomp(1).toUtf8String() == "1"
 
     fun decodeByte(): Byte =
@@ -78,9 +81,6 @@ class StringDecoder(private var bytes: ByteArray) {
 
     fun decodeDouble(): Double =
         throw NotImplementedError("No JS to Kotlin encoding exists for Kotlin Doubles")
-
-    fun <T> decodeList(): List<T> =
-        throw NotImplementedError("No JS to Kotlin encoding exists for Kotlin Lists")
 
     companion object {
         fun decodeDictionary(bytes: ByteArray): Map<String, String> {
@@ -181,6 +181,10 @@ class StringEncoder(
 
     @Suppress("UNUSED_PARAMETER") fun <T> encode(prefix: String, lst: List<T>) {
         throwNoJsEncoding("Lists")
+    }
+
+    @Suppress("UNUSED_PARAMETER") fun <T> encode(prefix: String, inline: T) {
+        throwNoJsEncoding("Inline")
     }
 
     private fun throwNoJsEncoding(typeName: String) {

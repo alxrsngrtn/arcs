@@ -11,13 +11,11 @@ import {Recipe} from '../runtime/recipe/recipe.js';
 import {Type} from '../runtime/type.js';
 import {Particle} from '../runtime/recipe/particle.js';
 import {KotlinGenerationUtils, quote, tryImport} from './kotlin-generation-utils.js';
-import {generateConnectionType} from './kotlin-codegen-shared.js';
+import {generateConnectionType, generateHandleType} from './kotlin-type-generator.js';
 import {HandleConnection} from '../runtime/recipe/handle-connection.js';
-import {Direction} from '../runtime/manifest-ast-nodes.js';
+import {Direction} from '../runtime/manifest-types/enums.js';
 import {Handle} from '../runtime/recipe/handle.js';
-import {Ttl, TtlUnits} from '../runtime/capabilities.js';
 import {AnnotationRef} from '../runtime/recipe/annotation.js';
-import {findLongRunningArcId} from './allocator-recipe-resolver.js';
 
 const ktUtils = new KotlinGenerationUtils();
 
@@ -31,8 +29,8 @@ export class PlanGeneratorError extends Error {
 /** Generates plan objects from resolved recipes. */
 export class PlanGenerator {
 
-  constructor(private resolvedRecipes: Recipe[], private namespace: string) {
-  }
+  constructor(private resolvedRecipes: Recipe[],
+              private namespace: string) {}
 
   /** Generates a Kotlin file with plan classes derived from resolved recipes. */
   async generate(): Promise<string> {
@@ -48,36 +46,53 @@ export class PlanGenerator {
 
   /** Converts a resolved recipe into a `Plan` object. */
   async createPlans(): Promise<string[]> {
-    const plans: string[] = [];
+    const declarations: string[] = [];
     for (const recipe of this.resolvedRecipes) {
-      const planName = `${recipe.name}Plan`;
-      const arcId = findLongRunningArcId(recipe);
+      const plan = await ktUtils.property(`${recipe.name}Plan`, async ({startIndent}) => {
+        return ktUtils.applyFun(`Plan`, [
+          ktUtils.listOf(await Promise.all(recipe.particles.map(p => this.createParticle(p)))),
+          ktUtils.listOf(recipe.handles.map(h => this.handleVariableName(h))),
+          PlanGenerator.createAnnotations(recipe.annotations)
+        ], {startIndent});
+      }, {delegate: 'lazy'});
 
-      const particles: string[] = [];
-      for (const particle of recipe.particles) {
-        particles.push(await this.createParticle(particle));
-      }
+      const handles = await Promise.all(recipe.handles.map(h => this.createHandleVariable(h)));
 
-      const planArgs = [ktUtils.listOf(particles)];
-      if (recipe.annotations.length > 0) {
-        planArgs.push(PlanGenerator.createAnnotations(recipe.annotations));
-      }
-
-      const start = `object ${planName} : `;
-      const plan = `${start}${ktUtils.applyFun('Plan', planArgs, {startIndent: start.length})}`;
-      plans.push(plan);
+      declarations.push([
+        ...handles,
+        plan
+      ].join('\n'));
     }
-    return plans;
+    return declarations;
+  }
+
+  /**
+   * @returns a name of the generated Kotlin variable with a Plan.handle corresponding to the given handle.
+   */
+  handleVariableName(handle: Handle): string {
+    return `${handle.recipe.name}_Handle${handle.recipe.handles.indexOf(handle)}`;
+  }
+
+  /**
+   * Generates a variable for a handle to be places inside a `Plan.Particle` object.
+   * We generate a variable instead of a inlining a handle, as we want to reference
+   * a handle both in a list of all plan handles, as well as in individual handle connections.
+   */
+  async createHandleVariable(handle: Handle): Promise<string> {
+    handle.type.maybeEnsureResolved();
+    return await ktUtils.property(this.handleVariableName(handle), async ({startIndent}) => {
+      return ktUtils.applyFun(`Handle`, [
+        await this.createStorageKey(handle),
+        await generateHandleType(handle.type.resolvedType()),
+        PlanGenerator.createAnnotations(handle.annotations)
+      ], {startIndent});
+    }, {delegate: 'lazy'});
   }
 
   /** Generates a Kotlin `Plan.Particle` instantiation from a Particle. */
   async createParticle(particle: Particle): Promise<string> {
     const spec = particle.spec;
-    let locationFromFile = (spec.implFile && spec.implFile.substring(spec.implFile.lastIndexOf('/') + 1));
-    if (locationFromFile && locationFromFile.startsWith('.')) {
-      locationFromFile = this.namespace + locationFromFile;
-    }
-    const location = (spec && (spec.implBlobUrl || locationFromFile)) || '';
+    const location = (spec && (spec.implBlobUrl || spec.implFile)) || '';
     const connectionMappings: string[] = [];
     for (const [key, conn] of Object.entries(particle.connections)) {
       connectionMappings.push(`"${key}" to ${await this.createHandleConnection(conn)}`);
@@ -92,13 +107,18 @@ export class PlanGenerator {
 
   /** Generates a Kotlin `Plan.HandleConnection` from a HandleConnection. */
   async createHandleConnection(connection: HandleConnection): Promise<string> {
-    const storageKey = await this.createStorageKey(connection.handle);
-    const mode = this.createHandleMode(connection.direction, connection.type);
-    const type = generateConnectionType(connection);
-    const annotations = PlanGenerator.createAnnotations(connection.handle.annotations);
 
-    return ktUtils.applyFun('HandleConnection', [storageKey, mode, type, annotations],
-        {startIndent: 24});
+    const handle = this.handleVariableName(connection.handle);
+    const mode = this.createHandleMode(connection.direction, connection.type);
+    const type = await generateConnectionType(connection, {namespace: this.namespace});
+    const annotations = PlanGenerator.createAnnotations(connection.handle.annotations);
+    const args = [handle, mode, type, annotations];
+    if (connection.spec.expression) {
+      // TODO: Add a test for an expression once recipe2plan tests move to .cgtest
+      args.push(quote(connection.spec.expression));
+    }
+
+    return ktUtils.applyFun('HandleConnection', args, {startIndent: 24});
   }
 
   /** Generates a Kotlin `HandleMode` from a Direction and Type. */
@@ -166,7 +186,12 @@ package ${this.namespace}
 //
 
 ${tryImport('arcs.core.data.*', this.namespace)}
+${tryImport('arcs.core.data.expression.*', this.namespace)}
+${tryImport('arcs.core.data.expression.Expression.*', this.namespace)}
+${tryImport('arcs.core.data.expression.Expression.BinaryOp.*', this.namespace)}
+${tryImport('arcs.core.data.Plan.*', this.namespace)}
 ${tryImport('arcs.core.storage.StorageKeyParser', this.namespace)}
+${tryImport('arcs.core.entity.toPrimitiveValue', this.namespace)}
 `;
   }
 

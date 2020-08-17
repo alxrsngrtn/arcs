@@ -5,7 +5,7 @@ import arcs.core.data.RawEntity
 import arcs.core.data.Schema
 import arcs.core.data.SchemaFields
 import arcs.core.data.SchemaName
-import arcs.core.entity.SchemaRegistry
+import arcs.core.data.SchemaRegistry
 import arcs.core.storage.keys.DatabaseStorageKey
 import arcs.core.storage.keys.RamDiskStorageKey
 import arcs.core.storage.referencemode.ReferenceModeStorageKey
@@ -42,9 +42,7 @@ class TestEntity(
                 ),
                 collections = emptyMap()
             ),
-            schemaHash,
-            refinement = { _ -> true },
-            query = null
+            schemaHash
         )
 
         init {
@@ -59,7 +57,11 @@ class TestEntity(
         )
 
         val singletonPersistentStorageKey = ReferenceModeStorageKey(
-            backingKey = DatabaseStorageKey.Persistent("singleton_reference", schemaHash, "arcs_test"),
+            backingKey = DatabaseStorageKey.Persistent(
+                "singleton_reference",
+                schemaHash,
+                "arcs_test"
+            ),
             storageKey = DatabaseStorageKey.Persistent("singleton", schemaHash, "arcs_test")
         )
 
@@ -69,7 +71,11 @@ class TestEntity(
         )
 
         val collectionPersistentStorageKey = ReferenceModeStorageKey(
-            backingKey = DatabaseStorageKey.Persistent("collection_reference", schemaHash, "arcs_test"),
+            backingKey = DatabaseStorageKey.Persistent(
+                "collection_reference",
+                schemaHash,
+                "arcs_test"
+            ),
             storageKey = DatabaseStorageKey.Persistent("collection", schemaHash, "arcs_test")
         )
 
@@ -79,6 +85,7 @@ class TestEntity(
     }
 
     enum class StorageMode {
-        IN_MEMORY, PERSISTENT
+        IN_MEMORY,
+        PERSISTENT,
     }
 }

@@ -11,23 +11,22 @@ import {Runtime} from '../runtime/runtime.js';
 import {Recipe} from '../runtime/recipe/recipe.js';
 import {Handle} from '../runtime/recipe/handle.js';
 import {Particle} from '../runtime/recipe/particle.js';
-import {Type, CollectionType, ReferenceType, SingletonType, TupleType, TypeVariable} from '../runtime/type.js';
+import {CollectionType, ReferenceType, SingletonType, TupleType, Type, TypeVariable} from '../runtime/type.js';
 import {Schema} from '../runtime/schema.js';
-import {HandleConnectionSpec, ParticleSpec} from '../runtime/particle-spec.js';
+import {HandleConnectionSpec, ParticleSpec} from '../runtime/manifest-types/particle-spec.js';
 import {Manifest} from '../runtime/manifest.js';
-import {Capabilities, Persistence, Shareable} from '../runtime/capabilities.js';
-import {CapabilityEnum, DirectionEnum, FateEnum, ManifestProto, PrimitiveTypeEnum} from './manifest-proto.js';
+import {DirectionEnum, FateEnum, ManifestProto, PrimitiveTypeEnum} from './manifest-proto.js';
 import {Refinement, RefinementExpressionLiteral} from '../runtime/refiner.js';
 import {Op} from '../runtime/manifest-ast-nodes.js';
-import {ClaimType} from '../runtime/particle-claim.js';
-import {CheckCondition, CheckExpression, CheckType} from '../runtime/particle-check.js';
+import {ClaimType, CheckType} from '../runtime/manifest-types/enums.js';
+import {CheckCondition, CheckExpression} from '../runtime/manifest-types/check.js';
 import {flatMap} from '../runtime/util.js';
 import {Policy} from '../runtime/policy/policy.js';
 import {policyToProtoPayload} from './policy2proto.js';
 import {annotationToProtoPayload} from './annotation2proto.js';
 
 export async function encodeManifestToProto(path: string): Promise<Uint8Array> {
-  const manifest = await Runtime.parseFile(path);
+  const manifest = await Runtime.parseFile(path, {throwImportErrors: true});
   return encodePayload(await manifestToProtoPayload(manifest));
 }
 
@@ -36,12 +35,19 @@ export async function manifestToProtoPayload(manifest: Manifest) {
   return makeManifestProtoPayload(manifest.allParticles, manifest.allRecipes, manifest.allPolicies);
 }
 
-export async function encodePlansToProto(plans: Recipe[]) {
-  const specMap = new Map<string, ParticleSpec>();
-  for (const spec of flatMap(plans, r => r.particles).map(p => p.spec)) {
-    specMap.set(spec.name, spec);
-  }
-  return encodePayload(await makeManifestProtoPayload([...specMap.values()], plans, /* policies= */ []));
+export async function encodePlansToProto(plans: Recipe[], manifest: Manifest) {
+  // In the recipe data structure every particle in a recipe currently has its own copy
+  // of a particle spec. This copy is used in type inference and gets mutated as recipe
+  // is type checked. As we need to encode particle specs without such mutations, below
+  // we reach for ParticleSpecs from manifest.particles, instead of the ones hanging from
+  // the recipe.particles.
+  // This should be cleaned-up in the recipe data structure and type infrence code,
+  // once that happens, we can remove the below hack.
+  const specToId = (spec: ParticleSpec) => `${spec.name}:${spec.implFile}`;
+  const planParticleIds = flatMap(plans, p => p.particles).map(p => specToId(p.spec));
+  const particleSpecs = manifest.allParticles.filter(p => planParticleIds.includes(specToId(p)));
+
+  return encodePayload(await makeManifestProtoPayload(particleSpecs, plans, /* policies= */ []));
 }
 
 async function makeManifestProtoPayload(particles: ParticleSpec[], recipes: Recipe[], policies: Policy[]) {
@@ -68,7 +74,8 @@ async function particleSpecToProtoPayload(spec: ParticleSpec) {
     location: spec.implFile,
     connections,
     claims,
-    checks
+    checks,
+    annotations: spec.annotations.map(a => annotationToProtoPayload(a)),
   };
 }
 
@@ -80,7 +87,8 @@ async function handleConnectionSpecToProtoPayload(spec: HandleConnectionSpec) {
   return {
     name: spec.name,
     direction: directionOrdinal,
-    type: await typeToProtoPayload(spec.type)
+    type: await typeToProtoPayload(spec.type),
+    expression: spec.expression
   };
 }
 
@@ -210,9 +218,11 @@ function accessPathProtoPayload(
     connectionSpec: HandleConnectionSpec,
     fieldPath: string[]
 ) {
-  const accessPath: {particleSpec: string, handleConnection: string, selectors?: {field: string}[]} = {
-    particleSpec: spec.name,
-    handleConnection: connectionSpec.name
+  const accessPath: {handle: {particleSpec: string, handleConnection: string}, selectors?: {field: string}[]} = {
+    handle: {
+      particleSpec: spec.name,
+      handleConnection: connectionSpec.name
+    }
   };
   if (fieldPath.length) {
     accessPath.selectors = fieldPath.map(field => ({field}));
@@ -235,18 +245,22 @@ async function recipeToProtoPayload(recipe: Recipe) {
 
   return {
     name: recipe.name,
-    particles: recipe.particles.map(p => recipeParticleToProtoPayload(p, handleToProtoPayload)),
+    particles: await Promise.all(recipe.particles.map(p => recipeParticleToProtoPayload(p, handleToProtoPayload))),
     handles: [...handleToProtoPayload.values()],
     annotations: recipe.annotations.map(a => annotationToProtoPayload(a))
   };
 }
 
-function recipeParticleToProtoPayload(particle: Particle, handleMap: Map<Handle, {name: string}>) {
+async function recipeParticleToProtoPayload(particle: Particle, handleMap: Map<Handle, {name: string}>) {
   return {
     specName: particle.name,
-    connections: Object.entries(particle.connections).map(
-      ([name, connection]) => ({name, handle: handleMap.get(connection.handle).name})
-    )
+    connections: await Promise.all(Object.entries(particle.connections).map(
+      async ([name, connection]) => ({
+        name,
+        handle: handleMap.get(connection.handle).name,
+        type: await typeToProtoPayload(connection.type)
+      })
+    ))
   };
 }
 
@@ -261,8 +275,8 @@ async function recipeHandleToProtoPayload(handle: Handle) {
     id: handle.id,
     tags: handle.tags,
     fate: fateOrdinal,
-    capabilities: capabilitiesToProtoOrdinals(handle.capabilities),
-    type: await typeToProtoPayload(handle.type || handle.mappedType)
+    type: await typeToProtoPayload(handle.type || handle.mappedType),
+    annotations: handle.annotations.map(annotationToProtoPayload)
   };
 
   if (handle.storageKey) {
@@ -274,35 +288,6 @@ async function recipeHandleToProtoPayload(handle: Handle) {
   }
 
   return handleData;
-}
-
-export function capabilitiesToProtoOrdinals(capabilities: Capabilities) {
-  // We bypass the inteface and grab the underlying set of capability strings for the purpose of
-  // serialization. It is rightfully hidden in the Capabilities object, but this use is justified.
-  // Tests will continue to ensure we access the right field.
-  const values = [];
-  if (capabilities.hasEquivalent(Persistence.onDisk())) {
-    values.push('PERSISTENT');
-  }
-
-  if (capabilities.isQueryable() || (capabilities.getTtl() && !capabilities.getTtl().isInfinite)) {
-    values.push('QUERYABLE');
-  }
-
-  if (capabilities.isShareable()) {
-    values.push('TIED_TO_RUNTIME');
-  }
-
-  if (capabilities.hasEquivalent(new Shareable(false))) {
-    values.push('TIED_TO_ARC');
-  }
-  return values.map(value => {
-    const ordinal = CapabilityEnum.values[value];
-    if (ordinal === undefined) {
-      throw new Error(`Capability ${value} is not supported`);
-    }
-    return ordinal;
-  });
 }
 
 export async function typeToProtoPayload(type: Type) {
@@ -318,7 +303,7 @@ export async function typeToProtoPayload(type: Type) {
       const entity = {
         entity: {
           schema: await schemaToProtoPayload(type.getEntitySchema()),
-        }
+        },
       };
       if (type.getEntitySchema().refinement) {
         entity['refinement'] = refinementToProtoPayload(type.getEntitySchema().refinement);
@@ -351,7 +336,10 @@ export async function typeToProtoPayload(type: Type) {
     case 'TypeVariable': {
       const constraintType = type.canReadSubset || type.canWriteSuperset;
       const name = {name: (type as TypeVariable).variable.name};
-      const constraint = constraintType ? {constraint: {constraintType: await typeToProtoPayload(constraintType)}} : {};
+      const constraint = {constraint: {maxAccess: (type as TypeVariable).variable.resolveToMaxType || false}};
+      if (constraintType) {
+        constraint.constraint['constraintType'] = await typeToProtoPayload(constraintType);
+      }
       return {variable: {...name, ...constraint}};
     }
     default: throw new Error(`Type '${type.tag}' is not supported.`);
@@ -377,7 +365,8 @@ type SchemaField = {
 
 async function schemaFieldToProtoPayload(fieldType: SchemaField) {
   switch (fieldType.kind) {
-    case 'schema-primitive': {
+    case 'schema-primitive':
+    case 'kotlin-primitive':  {
       const primitive = PrimitiveTypeEnum.values[fieldType.type.toUpperCase()];
       if (primitive === undefined) {
         throw new Error(`Primitive field type ${fieldType.type} is not supported.`);
@@ -405,8 +394,25 @@ async function schemaFieldToProtoPayload(fieldType: SchemaField) {
         }
       };
     }
-    case 'schema-inline': {
+    case 'type-name': {
       return typeToProtoPayload(fieldType.model);
+    }
+    case 'schema-nested': {
+      // Nested inlined entity. Wraps a 'schema-inline' object. Mark it as an
+      // inline entity.
+      const entityType = await schemaFieldToProtoPayload(fieldType.schema);
+      entityType.entity.inline = true;
+      return entityType;
+    }
+    case 'schema-inline': {
+      // Not actually a nested inline entity (if it were, it would be wrapped in
+      // a schema-nested object), so just encode as a regular entity.
+      return typeToProtoPayload(fieldType.model);
+    }
+    case 'schema-ordered-list': {
+      return {
+        list: {elementType: await schemaFieldToProtoPayload(fieldType.schema)}
+      };
     }
     // TODO(b/154947220) support schema-unions
     case 'schema-union':

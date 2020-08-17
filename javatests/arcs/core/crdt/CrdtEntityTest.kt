@@ -12,6 +12,7 @@
 package arcs.core.crdt
 
 import arcs.core.crdt.CrdtEntity.Operation.AddToSet
+import arcs.core.crdt.CrdtEntity.Operation.ClearAll
 import arcs.core.crdt.CrdtEntity.Operation.ClearSingleton
 import arcs.core.crdt.CrdtEntity.Operation.RemoveFromSet
 import arcs.core.crdt.CrdtEntity.Operation.SetSingleton
@@ -36,8 +37,12 @@ class CrdtEntityTest {
 
         assertThat(entity.consumerView.singletons).isEqualTo(mapOf("foo" to null))
         assertThat(entity.consumerView.collections).isEqualTo(mapOf("bar" to emptySet<Reference>()))
-        assertThat(entity.consumerView.creationTimestamp).isEqualTo(RawEntity.UNINITIALIZED_TIMESTAMP)
-        assertThat(entity.consumerView.expirationTimestamp).isEqualTo(RawEntity.UNINITIALIZED_TIMESTAMP)
+        assertThat(entity.consumerView.creationTimestamp).isEqualTo(
+            RawEntity.UNINITIALIZED_TIMESTAMP
+        )
+        assertThat(entity.consumerView.expirationTimestamp).isEqualTo(
+            RawEntity.UNINITIALIZED_TIMESTAMP
+        )
         assertThat(entity.consumerView.id).isEqualTo(RawEntity.NO_REFERENCE_ID)
     }
 
@@ -173,6 +178,32 @@ class CrdtEntityTest {
     }
 
     @Test
+    fun clearAll() {
+        val rawEntity = RawEntity(
+            id = "an-id",
+            singletons = mapOf("foo" to Reference("fooRef")),
+            collections = mapOf(
+                "bar" to setOf(Reference("barRef1"), Reference("barRef2")),
+                "baz" to setOf(Reference("bazRef"))
+            ),
+            creationTimestamp = 10L,
+            expirationTimestamp = 20L
+        )
+        val entity = CrdtEntity(VersionMap(), rawEntity)
+
+        assertThat(entity.applyOperation(ClearAll("me", VersionMap()))).isTrue()
+        assertThat(entity.consumerView).isEqualTo(
+            RawEntity(
+                id = "an-id",
+                singletonFields = setOf("foo"),
+                collectionFields = setOf("bar", "baz"),
+                creationTimestamp = RawEntity.UNINITIALIZED_TIMESTAMP,
+                expirationTimestamp = RawEntity.UNINITIALIZED_TIMESTAMP
+            )
+        )
+    }
+
+    @Test
     fun keepsSeparateClocks_forSeparateFields() {
         val rawEntity = RawEntity(
             singletonFields = setOf("name", "age")
@@ -263,13 +294,13 @@ class CrdtEntityTest {
         creation: Long = RawEntity.UNINITIALIZED_TIMESTAMP,
         expiration: Long = RawEntity.UNINITIALIZED_TIMESTAMP
     ) =
-            CrdtEntity(VersionMap(), RawEntity(
-                id = "an-id",
-                singletons = mapOf(),
-                collections = mapOf(),
-                creationTimestamp = creation,
-                expirationTimestamp = expiration
-            ))
+        CrdtEntity(VersionMap(), RawEntity(
+            id = "an-id",
+            singletons = mapOf(),
+            collections = mapOf(),
+            creationTimestamp = creation,
+            expirationTimestamp = expiration
+        ))
 
     @Test
     fun mergeCreationTimestampCorrectly() {
@@ -353,5 +384,30 @@ class CrdtEntityTest {
         assertFailsWith<CrdtException> {
             entity.merge(entity2.data)
         }
+    }
+
+    @Test
+    fun mergeIntoEmptyModel() {
+        val rawEntity = RawEntity(
+            id = "an-id",
+            singletons = mapOf("foo" to Reference("fooRef")),
+            collections = mapOf(
+                "bar" to setOf(Reference("barRef1"), Reference("barRef2"))
+            )
+        )
+        val emptyRawEntity = RawEntity(
+            id = "an-id",
+            singletons = mapOf("foo" to null),
+            collections = mapOf(
+                "bar" to setOf()
+            )
+        )
+        val entity = CrdtEntity(VersionMap("me" to 1), rawEntity)
+        val emptyEntity = CrdtEntity(VersionMap(), emptyRawEntity)
+
+        val changes = emptyEntity.merge(entity.data)
+        println(changes)
+        assertThat(changes.modelChange.isEmpty()).isFalse()
+        assertThat(changes.otherChange.isEmpty()).isTrue()
     }
 }

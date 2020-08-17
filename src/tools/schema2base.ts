@@ -13,17 +13,9 @@ import minimist from 'minimist';
 import {Manifest} from '../runtime/manifest.js';
 import {Runtime} from '../runtime/runtime.js';
 import {SchemaGraph, SchemaNode} from './schema2graph.js';
-import {ParticleSpec} from '../runtime/particle-spec.js';
+import {ParticleSpec} from '../runtime/manifest-types/particle-spec.js';
 
-export type AddFieldOptions = Readonly<{
-  field: string;
-  typeName: string;
-  isOptional?: boolean;
-  refClassName?: string;
-  refSchemaHash?: string;
-  listTypeName?: string;
-  isCollection?: boolean;
-}>;
+Runtime.init('../..');
 
 export interface EntityGenerator {
   generate(): string;
@@ -34,57 +26,10 @@ export class NodeAndGenerator {
   generator: EntityGenerator;
 }
 
-/**
- * Iterates over schema fields and composes metadata useful for entity codegen.
- */
-export abstract class SchemaDescriptorBase {
-
-  constructor(readonly node: SchemaNode) {}
-
-  process() {
-    for (const [field, descriptor] of Object.entries(this.node.schema.fields)) {
-      if (descriptor.kind === 'schema-primitive') {
-        if (['Text', 'URL', 'Number', 'Boolean'].includes(descriptor.type)) {
-          this.addField({field, typeName: descriptor.type});
-        } else {
-          throw new Error(`Schema type '${descriptor.type}' for field '${field}' is not supported`);
-        }
-      } else if (descriptor.kind === 'schema-reference' || (descriptor.kind === 'schema-collection' && descriptor.schema.kind === 'schema-reference')) {
-        const isCollection = descriptor.kind === 'schema-collection';
-        const schemaNode = this.node.refs.get(field);
-        this.addField({
-          field,
-          typeName: 'Reference',
-          isCollection,
-          refClassName: schemaNode.entityClassName,
-          refSchemaHash: schemaNode.hash,
-        });
-      } else if (descriptor.kind === 'schema-collection') {
-        const schema = descriptor.schema;
-         if (!((schema.kind === 'kotlin-primitive') || ['Text', 'URL', 'Number', 'Boolean'].includes(schema.type))) {
-          throw new Error(`Schema type '${schema.type}' for field '${field}' is not supported`);
-        }
-        this.addField({field, typeName: schema.type, isCollection: true});
-      } else if (descriptor.kind === 'kotlin-primitive') {
-        this.addField({field, typeName: descriptor.type});
-      } else if (descriptor.kind === 'schema-ordered-list') {
-        this.addField({field, typeName: 'List', listTypeName: descriptor.schema.type});
-      }
-      else {
-        throw new Error(`Schema kind '${descriptor.kind}' for field '${field}' is not supported`);
-      }
-    }
-  }
-
-  abstract addField(opts: AddFieldOptions): void;
-}
-
 export abstract class Schema2Base {
   namespace: string;
 
-  constructor(readonly opts: minimist.ParsedArgs) {
-    Runtime.init('../..');
-  }
+  constructor(readonly opts: minimist.ParsedArgs) {}
 
   async call() {
     fs.mkdirSync(this.opts.outdir, {recursive: true});
@@ -116,8 +61,7 @@ export abstract class Schema2Base {
 
     const classes = await this.processManifest(manifest);
     if (classes.length === 0) {
-      console.warn(`Could not find any particle connections with schemas in '${src}'`);
-      return;
+      console.warn(`Could not find any particle in '${src}'`);
     }
 
     const outFile = fs.openSync(outPath, 'w');
@@ -138,11 +82,11 @@ export abstract class Schema2Base {
       classes.push(...nodes.map(ng => ng.generator.generate()));
 
       if (this.opts.test_harness) {
-        classes.push(this.generateTestHarness(particle, nodes.map(n => n.node)));
+        classes.push(await this.generateTestHarness(particle, nodes.map(n => n.node)));
         continue;
       }
 
-      classes.push(this.generateParticleClass(particle, nodes));
+      classes.push(await this.generateParticleClass(particle, nodes));
     }
     return classes;
   }
@@ -171,7 +115,7 @@ export abstract class Schema2Base {
 
   abstract getEntityGenerator(node: SchemaNode): EntityGenerator;
 
-  abstract generateParticleClass(particle: ParticleSpec, nodes: NodeAndGenerator[]): string;
+  abstract async generateParticleClass(particle: ParticleSpec, nodes: NodeAndGenerator[]): Promise<string>;
 
-  abstract generateTestHarness(particle: ParticleSpec, nodes: SchemaNode[]): string;
+  abstract async generateTestHarness(particle: ParticleSpec, nodes: SchemaNode[]): Promise<string>;
 }

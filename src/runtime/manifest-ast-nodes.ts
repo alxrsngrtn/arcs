@@ -7,9 +7,8 @@
  * subject to an additional IP rights grant found at
  * http://polymer.github.io/PATENTS.txt
  */
-import {ClaimType} from './particle-claim.js';
-import {CheckType} from './particle-check.js';
-
+import {Direction, SlotDirection, ClaimType, CheckType} from './manifest-types/enums.js';
+export {Direction, SlotDirection, ClaimType, CheckType};
 /**
  * Complete set of tokens used by `manifest-parser.pegjs`. To use this you
  * need to follow some simple guidelines:
@@ -32,6 +31,7 @@ export interface SourceLocation {
   filename?: string;
   start: SourcePosition;
   end: SourcePosition;
+  text?: string; // Optionally keeps a copy of the raw/unparsed text.
 }
 
 /**
@@ -232,8 +232,8 @@ export interface Particle extends BaseNode {
   slots?: ParticleSlotConnection[];    // not used in RecipeParticle
   description?: Description;  // not used in RecipeParticle
   hasParticleHandleConnection?: boolean;  // not used in RecipeParticle
-  trustChecks?: ParticleCheckStatement[];
-  trustClaims?: ParticleClaimStatement[];
+  trustChecks?: CheckStatement[];
+  trustClaims?: ClaimStatement[];
 
   // fields in RecipeParticle only
   ref?: ParticleRef | '*';
@@ -242,20 +242,20 @@ export interface Particle extends BaseNode {
 }
 
 /** A trust claim made by a particle about one of its handles. */
-export interface ParticleClaimStatement extends BaseNode {
-  kind: 'particle-trust-claim';
+export interface ClaimStatement extends BaseNode {
+  kind: 'claim';
   handle: string;
   fieldPath: string[];
-  expression: ParticleClaimExpression;
+  expression: ClaimExpression;
 }
 
-export type ParticleClaimExpression = ParticleClaim[];
+export type ClaimExpression = Claim[];
 
-export type ParticleClaim = ParticleClaimIsTag | ParticleClaimDerivesFrom;
+export type Claim = ClaimIsTag | ClaimDerivesFrom;
 
 /** A claim made by a particle, saying that one of its outputs has a particular trust tag (e.g. "claim output is foo"). */
-export interface ParticleClaimIsTag extends BaseNode {
-  kind: 'particle-trust-claim-is-tag';
+export interface ClaimIsTag extends BaseNode {
+  kind: 'claim-is-tag';
   claimType: ClaimType.IsTag;
   isNot: boolean;
   tag: string;
@@ -265,69 +265,69 @@ export interface ParticleClaimIsTag extends BaseNode {
  * A claim made by a particle, saying that one of its outputs derives from one/some of its inputs (e.g. "claim output derives from input1 and
  * input2").
  */
-export interface ParticleClaimDerivesFrom extends BaseNode {
-  kind: 'particle-trust-claim-derives-from';
+export interface ClaimDerivesFrom extends BaseNode {
+  kind: 'claim-derives-from';
   claimType: ClaimType.DerivesFrom;
   parentHandle: string;
   fieldPath: string[];
 }
 
-export interface ParticleCheckStatement extends BaseNode {
-  kind: 'particle-trust-check';
-  target: ParticleCheckTarget;
-  expression: ParticleCheckExpression;
+export interface CheckStatement extends BaseNode {
+  kind: 'check';
+  target: CheckTarget;
+  expression: CheckExpression;
 }
 
-export interface ParticleCheckTarget extends BaseNode {
-  kind: 'particle-check-target';
+export interface CheckTarget extends BaseNode {
+  kind: 'check-target';
   targetType: 'handle' | 'slot';
   name: string;
   fieldPath: string[];
 }
 
-export interface ParticleCheckBooleanExpression extends BaseNode {
-  kind: 'particle-trust-check-boolean-expression';
+export interface CheckBooleanExpression extends BaseNode {
+  kind: 'check-boolean-expression';
   operator: 'and' | 'or';
-  children: ParticleCheckExpression[];
+  children: CheckExpression[];
 }
 
-export type ParticleCheckExpression = ParticleCheckBooleanExpression | ParticleCheckCondition;
+export type CheckExpression = CheckBooleanExpression | CheckCondition;
 
-export type ParticleCheckCondition = ParticleCheckHasTag | ParticleCheckIsFromHandle | ParticleCheckIsFromOutput | ParticleCheckIsFromStore | ParticleCheckImplication;
+export type CheckCondition = CheckHasTag | CheckIsFromHandle | CheckIsFromOutput | CheckIsFromStore | CheckImplication;
 
-export interface ParticleCheckHasTag extends BaseNode {
-  kind: 'particle-trust-check-has-tag';
+export interface CheckHasTag extends BaseNode {
+  kind: 'check-has-tag';
   checkType: CheckType.HasTag;
   isNot: boolean;
   tag: string;
 }
 
-export interface ParticleCheckIsFromHandle extends BaseNode {
-  kind: 'particle-trust-check-is-from-handle';
+export interface CheckIsFromHandle extends BaseNode {
+  kind: 'check-is-from-handle';
   checkType: CheckType.IsFromHandle;
   isNot: boolean;
   parentHandle: string;
 }
 
-export interface ParticleCheckIsFromOutput extends BaseNode {
-  kind: 'particle-trust-check-is-from-output';
+export interface CheckIsFromOutput extends BaseNode {
+  kind: 'check-is-from-output';
   checkType: CheckType.IsFromOutput;
   isNot: boolean;
   output: string;
 }
 
-export interface ParticleCheckIsFromStore extends BaseNode {
-  kind: 'particle-trust-check-is-from-store';
+export interface CheckIsFromStore extends BaseNode {
+  kind: 'check-is-from-store';
   checkType: CheckType.IsFromStore;
   isNot: boolean;
   storeRef: StoreReference;
 }
 
-export interface ParticleCheckImplication extends BaseNode {
-  kind: 'particle-trust-check-implication';
+export interface CheckImplication extends BaseNode {
+  kind: 'check-implication';
   checkType: CheckType.Implication;
-  antecedent: ParticleCheckCondition;
-  consequent: ParticleCheckCondition;
+  antecedent: CheckCondition;
+  consequent: CheckCondition;
 }
 
 export interface StoreReference extends BaseNode {
@@ -350,6 +350,7 @@ export interface ParticleHandleConnection extends BaseNode {
   name: string;
   tags: TagList;
   annotations: AnnotationRef[];
+  expression: Expression;
 }
 
 export type ParticleItem = ParticleModality | ParticleSlotConnection | Description | ParticleHandleConnection;
@@ -520,14 +521,12 @@ export interface RecipeHandle extends BaseNode {
   ref: HandleRef;
   fate: Fate;
   annotations: AnnotationRef[];
-  adapter: AppliedAdapter;
 }
 
 export interface RecipeSyntheticHandle extends BaseNode {
   kind: 'synthetic-handle';
   name: string|null;
   associations: string[];
-  adapter: AppliedAdapter;
 }
 
 export interface AppliedAdapter extends BaseNode {
@@ -633,9 +632,9 @@ export interface SchemaField extends BaseNode {
 }
 
 export type SchemaType = SchemaReferenceType|SchemaCollectionType|
-    SchemaPrimitiveType|KotlinPrimitiveType|SchemaUnionType|SchemaTupleType;
+    SchemaPrimitiveType|KotlinPrimitiveType|SchemaUnionType|SchemaTupleType|TypeName|SchemaInline|SchemaOrderedListType|NestedSchema|KotlinPrimitiveType;
 
-export type SchemaPrimitiveTypeValue = 'Text'|'URL'|'Number'|'Boolean'|'Bytes'|'Object';
+export type SchemaPrimitiveTypeValue = 'Text'|'URL'|'Number'|'BigInteger'|'Boolean'|'Bytes'|'Object';
 
 export interface SchemaPrimitiveType extends BaseNodeWithRefinement {
   kind: 'schema-primitive';
@@ -666,12 +665,12 @@ export interface SchemaReferenceType extends BaseNodeWithRefinement {
 
 export interface SchemaUnionType extends BaseNodeWithRefinement {
   kind: 'schema-union';
-  types: string[];
+  types: SchemaType[];
 }
 
 export interface SchemaTupleType extends BaseNodeWithRefinement {
   kind: 'schema-tuple';
-  types: string[];
+  types: SchemaType[];
 }
 
 export interface RefinementNode extends BaseNode {
@@ -679,7 +678,7 @@ export interface RefinementNode extends BaseNode {
   expression: RefinementExpressionNode;
 }
 
-export type RefinementExpressionNode = BinaryExpressionNode | UnaryExpressionNode | FieldNode | QueryNode | BuiltInNode | NumberNode | BooleanNode | TextNode;
+export type RefinementExpressionNode = BinaryExpressionNode | UnaryExpressionNode | FieldNode | QueryNode | BuiltInNode | NumberNode | DiscreteNode | BooleanNode | TextNode;
 
 export enum Op {
   AND = 'and',
@@ -728,9 +727,33 @@ export interface BuiltInNode extends BaseNode {
   value: string;
 }
 
+export enum Primitive {
+  BOOLEAN = 'Boolean',
+  NUMBER = 'Number',
+  BIGINT = 'BigInt',
+  LONG = 'Long',
+  INT = 'Int',
+  TEXT = 'Text',
+  UNKNOWN = '~query_arg_type',
+}
+
 export interface NumberNode extends BaseNode {
   kind: 'number-node';
   value: number;
+  units?: string[];
+}
+
+export type DiscreteType = Primitive.BIGINT | Primitive.INT | Primitive.LONG | Primitive.BOOLEAN;
+export const discreteTypes: Primitive[] = [
+  Primitive.BIGINT,
+  Primitive.LONG,
+  Primitive.INT
+];
+
+export interface DiscreteNode extends BaseNode {
+  kind: 'discrete-node';
+  value: bigint;
+  type: DiscreteType;
   units?: string[];
 }
 
@@ -775,33 +798,22 @@ export interface SchemaAlias extends BaseNode {
   alias: string;
 }
 
-export interface AdapterNode extends BaseNode {
-  kind: 'adapter-node';
-  name: string;
-  params: AdapterParam[];
-  body: AdapterBodyDefinition;
-}
+export type Expression = ExpressionEntity;
 
-export interface AdapterParam extends BaseNode {
-  kind: 'adapter-param';
-  name: string;
-  type: ParticleHandleConnectionType;
-}
-
-export interface AdapterBodyDefinition extends BaseNode {
-  kind: 'adapter-body-definition';
+export interface ExpressionEntity extends BaseNode {
+  kind: 'expression-entity';
   names: string[];
-  fields: AdapterField[];
+  fields: ExpressionEntityField[];
 }
 
-export interface AdapterField extends BaseNode {
-  kind: 'adapter-field';
+export interface ExpressionEntityField extends BaseNode {
+  kind: 'expression-entity-field';
   name: string;
-  expression: AdapterScopeExpression;
+  expression: ExpressionScopeLookup;
 }
 
-export interface AdapterScopeExpression extends BaseNode {
-  kind: 'adapter-scope-expression';
+export interface ExpressionScopeLookup extends BaseNode {
+  kind: 'expression-scope-lookup';
   scopeChain: string[];
 }
 
@@ -850,7 +862,7 @@ export interface SlotFormFactor extends BaseNode {
 
 export type ParticleSlotConnectionItem = SlotFormFactor | ParticleProvidedSlot;
 
-export interface TypeName extends BaseNode {
+export interface TypeName extends BaseNodeWithRefinement {
   kind: 'type-name';
   name: string;
 }
@@ -929,10 +941,6 @@ export type whiteSpace = string;
 export type eolWhiteSpace = string;
 export type eol = string;
 
-// String-based enums.
-// TODO: convert to actual enums so that they can be iterated over.
-export type Direction = 'reads' | 'writes' | 'reads writes' | 'hosts' | '`consumes' | '`provides' | 'any';
-
 export function preSlandlesDirectionToDirection(direction: Direction, isOptional: boolean = false): string {
   // TODO(jopra): Remove after syntax unification.
   // Use switch for totality checking.
@@ -958,7 +966,6 @@ export function preSlandlesDirectionToDirection(direction: Direction, isOptional
   }
 }
 
-export type SlotDirection = 'provides' | 'consumes';
 export type Fate = 'use' | 'create' | 'map' | 'copy' | 'join' | '?' | '`slot';
 
 export type ParticleHandleConnectionType = TypeVariable|CollectionType|
@@ -971,3 +978,18 @@ export type All = Import|Meta|MetaName|MetaStorageKey|MetaNamespace|Particle|Par
 
 export type ManifestItem =
     RecipeNode|Particle|Import|Schema|ManifestStorage|Interface|Meta|Resource;
+
+export function viewAst(ast: unknown, viewLocation = false) {
+  // Helper function useful for viewing ast information while working on the parser and test code:
+  // Optionally, strips location information.
+  console.log(
+    JSON.stringify(ast, (_key, value) => {
+    if (!viewLocation && value != null && value['location']) {
+      delete value['location'];
+    }
+    return typeof value === 'bigint'
+      ? value.toString() // Workaround for JSON not supporting bigint.
+      : value;
+  }, // return everything else unchanged
+  2));
+}

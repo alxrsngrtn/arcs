@@ -6,16 +6,16 @@ import arcs.core.data.Plan
 import arcs.core.storage.api.DriverAndKeyConfigurator
 import arcs.core.storage.driver.RamDisk
 import arcs.core.storage.driver.RamDiskDriverProvider
-import arcs.core.storage.driver.VolatileDriverProvider
-import arcs.core.storage.keys.RamDiskStorageKey
-import arcs.core.storage.keys.VolatileStorageKey
+import arcs.core.storage.driver.VolatileDriverProviderFactory
 import arcs.core.util.TaggedLog
 import arcs.core.util.testutil.LogRule
 import arcs.jvm.host.ExplicitHostRegistry
-import arcs.jvm.host.JvmHost
 import arcs.jvm.host.JvmSchedulerProvider
+import arcs.jvm.util.JvmTime
 import arcs.jvm.util.testutil.FakeTime
 import com.google.common.truth.Truth.assertThat
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
@@ -24,8 +24,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
-import kotlin.coroutines.EmptyCoroutineContext
-
 
 @RunWith(JUnit4::class)
 @ExperimentalCoroutinesApi
@@ -36,7 +34,14 @@ class ReflectiveParticleConstructionTest {
     class JvmProdHost(
         schedulerProvider: SchedulerProvider,
         vararg particles: ParticleRegistration
-    ) : JvmHost(schedulerProvider, *particles), ProdHost
+    ) : AbstractArcHost(
+        coroutineContext = Dispatchers.Default,
+        updateArcHostContextCoroutineContext = Dispatchers.Default,
+        schedulerProvider = schedulerProvider,
+        initialParticles = *particles
+    ), ProdHost {
+        override val platformTime = JvmTime
+    }
 
     class AssertingReflectiveParticle(spec: Plan.Particle?) : TestReflectiveParticle(spec) {
         private val log = TaggedLog { "AssertingReflectiveParticle" }
@@ -60,6 +65,7 @@ class ReflectiveParticleConstructionTest {
         RamDisk.clear()
         DriverAndKeyConfigurator.configureKeyParsers()
         RamDiskDriverProvider()
+        VolatileDriverProviderFactory()
 
         val hostRegistry = ExplicitHostRegistry()
         val schedulerProvider = JvmSchedulerProvider(EmptyCoroutineContext)

@@ -27,7 +27,7 @@ import com.nhaarman.mockitokotlin2.times
 import com.nhaarman.mockitokotlin2.verify
 import com.nhaarman.mockitokotlin2.verifyNoMoreInteractions
 import com.nhaarman.mockitokotlin2.whenever
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlin.coroutines.EmptyCoroutineContext
 import org.junit.Before
 import org.junit.Ignore
 import org.junit.Test
@@ -35,16 +35,18 @@ import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
-import kotlin.coroutines.EmptyCoroutineContext
 
 @RunWith(JUnit4::class)
-@OptIn(ExperimentalCoroutinesApi::class)
 class ParticleContextTest {
 
-    @Mock lateinit var particle: Particle
-    @Mock lateinit var handles: HandleHolder
-    @Mock lateinit var notifyReady: (Particle) -> Unit
-    @Mock lateinit var mark: (String) -> Unit
+    @Mock
+    lateinit var particle: Particle
+    @Mock
+    lateinit var handles: HandleHolder
+    @Mock
+    lateinit var notifyReady: (Particle) -> Unit
+    @Mock
+    lateinit var mark: (String) -> Unit
     lateinit var context: ParticleContext
 
     @Before
@@ -80,7 +82,7 @@ class ParticleContextTest {
         assertThat(context.particleState).isEqualTo(ParticleState.Stopped)
 
         val mocks = arrayOf(particle, notifyReady, mark, handles, handle)
-        with (inOrder(*mocks)) {
+        with(inOrder(*mocks)) {
             verify(mark).invoke("initParticle")
             verify(particle).onFirstStart()
             verify(particle).onStart()
@@ -125,7 +127,7 @@ class ParticleContextTest {
         assertThat(context.particleState).isEqualTo(ParticleState.Stopped)
 
         val mocks = arrayOf(particle, notifyReady, mark, handles, handle)
-        with (inOrder(*mocks)) {
+        with(inOrder(*mocks)) {
             verify(mark).invoke("initParticle")
             verify(particle).onFirstStart()
             verify(particle).onStart()
@@ -175,7 +177,7 @@ class ParticleContextTest {
         }
 
         // All handle.onReady calls are required for particle.onReady
-        context.notify(StorageEvent.READY, handle1)  // TODO(b/159257058)
+        context.notify(StorageEvent.READY, handle1) // TODO(b/159257058)
         context.notify(StorageEvent.READY, handle2)
         assertThat(context.particleState).isEqualTo(ParticleState.Waiting)
         context.notify(StorageEvent.READY, handle3)
@@ -193,21 +195,21 @@ class ParticleContextTest {
         // Only the first handle.onDesync triggers particle.onDesync
         // All handle.onResyncs are required for particle.onResync
         mark("desync1")
-        context.notify(StorageEvent.DESYNC, handle2)  // h2 desynced
+        context.notify(StorageEvent.DESYNC, handle2) // h2 desynced
         assertThat(context.particleState).isEqualTo(ParticleState.Desynced)
 
-        context.notify(StorageEvent.DESYNC, handle3)  // h2, h3 desynced
-        context.notify(StorageEvent.RESYNC, handle2)  // h3 desynced
-        context.notify(StorageEvent.DESYNC, handle4)  // h3, h4 desynced
-        context.notify(StorageEvent.RESYNC, handle4)  // h3 desynced
+        context.notify(StorageEvent.DESYNC, handle3) // h2, h3 desynced
+        context.notify(StorageEvent.RESYNC, handle2) // h3 desynced
+        context.notify(StorageEvent.DESYNC, handle4) // h3, h4 desynced
+        context.notify(StorageEvent.RESYNC, handle4) // h3 desynced
         assertThat(context.particleState).isEqualTo(ParticleState.Desynced)
 
         mark("desync2")
-        context.notify(StorageEvent.RESYNC, handle3)  // all resynced
+        context.notify(StorageEvent.RESYNC, handle3) // all resynced
         assertThat(context.particleState).isEqualTo(ParticleState.Running)
 
         val mocks = arrayOf(particle, mark, handle1, handle2, handle3, handle4)
-        with (inOrder(*mocks)) {
+        with(inOrder(*mocks)) {
             verify(mark).invoke("ready")
             verify(particle).onReady()
 
@@ -224,52 +226,55 @@ class ParticleContextTest {
 
     @Test
     fun errors_onFirstStart_firstInstantiation() = runTest {
-        whenever(particle.onFirstStart()).thenThrow(RuntimeException::class.java)
+        whenever(particle.onFirstStart()).thenThrow(RuntimeException("boom"))
 
         assertSuspendingThrows(RuntimeException::class) { context.initParticle() }
         verify(particle, only()).onFirstStart()
         assertThat(context.particleState).isEqualTo(ParticleState.Failed_NeverStarted)
+        assertThat(context.particleState.cause).hasMessageThat().isEqualTo("boom")
     }
 
     @Test
     fun errors_onStart_secondInstantiation() = runTest {
-        whenever(particle.onStart()).thenThrow(RuntimeException::class.java)
+        whenever(particle.onStart()).thenThrow(RuntimeException("boom"))
 
         assertSuspendingThrows(RuntimeException::class) { context.initParticle() }
-        with (inOrder(particle)) {
+        with(inOrder(particle)) {
             verify(particle).onFirstStart()
             verify(particle).onStart()
         }
         verifyNoMoreInteractions(particle, handles)
         assertThat(context.particleState).isEqualTo(ParticleState.Failed)
+        assertThat(context.particleState.cause).hasMessageThat().isEqualTo("boom")
     }
 
     @Test
     fun errors_onReady_runParticle() = runTest {
-        whenever(particle.onReady()).thenThrow(RuntimeException::class.java)
+        whenever(particle.onReady()).thenThrow(RuntimeException("boom"))
         context.initParticle()
 
         assertSuspendingThrows(RuntimeException::class) { context.runParticle(notifyReady) }
-        with (inOrder(particle)) {
+        with(inOrder(particle)) {
             verify(particle).onFirstStart()
             verify(particle).onStart()
             verify(particle).onReady()
         }
         verifyNoMoreInteractions(particle, handles)
         assertThat(context.particleState).isEqualTo(ParticleState.Failed)
+        assertThat(context.particleState.cause).hasMessageThat().isEqualTo("boom")
     }
 
     // TODO(b/158790341): test errors in StorageEvent-driven methods
 
     @Test
     fun errors_onShutdown() = runTest {
-        whenever(particle.onShutdown()).thenThrow(RuntimeException::class.java)
+        whenever(particle.onShutdown()).thenThrow(RuntimeException("boom"))
         context.initParticle()
         context.runParticle(notifyReady)
 
         // stopParticle doesn't throw but still marks the particle as failed
         context.stopParticle()
-        with (inOrder(particle, handles)) {
+        with(inOrder(particle, handles)) {
             verify(particle).onFirstStart()
             verify(particle).onStart()
             verify(particle).onReady()
@@ -279,20 +284,23 @@ class ParticleContextTest {
         }
         verifyNoMoreInteractions(particle, handles)
         assertThat(context.particleState).isEqualTo(ParticleState.Failed)
+        assertThat(context.particleState.cause).hasMessageThat().isEqualTo("boom")
     }
 
     @Test
     fun errors_crashLoopingParticle() = runTest {
-        whenever(particle.onStart()).thenThrow(RuntimeException::class.java)
+        whenever(particle.onStart()).thenThrow(RuntimeException("boom"))
 
         for (i in 1..MAX_CONSECUTIVE_FAILURES) {
             assertSuspendingThrows(RuntimeException::class) { context.initParticle() }
             assertThat(context.consecutiveFailureCount).isEqualTo(i)
         }
         assertThat(context.particleState).isEqualTo(ParticleState.Failed)
+        assertThat(context.particleState.cause).hasMessageThat().isEqualTo("boom")
 
         assertSuspendingThrows(RuntimeException::class) { context.initParticle() }
         assertThat(context.particleState).isEqualTo(ParticleState.MaxFailed)
+        assertThat(context.particleState.cause).hasMessageThat().isEqualTo("boom")
     }
 
     private fun mockHandle(handleMode: HandleMode) =

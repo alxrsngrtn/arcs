@@ -7,9 +7,9 @@
  * subject to an additional IP rights grant found at
  * http://polymer.github.io/PATENTS.txt
  */
-import {Schema2Base, EntityGenerator, AddFieldOptions, SchemaDescriptorBase} from './schema2base.js';
+import {Schema2Base, EntityGenerator} from './schema2base.js';
 import {SchemaNode} from './schema2graph.js';
-import {ParticleSpec} from '../runtime/particle-spec.js';
+import {ParticleSpec} from '../runtime/manifest-types/particle-spec.js';
 import {Type} from '../runtime/type.js';
 import {Dictionary} from '../runtime/hot.js';
 
@@ -48,6 +48,7 @@ const typeMap: Dictionary<CppTypeInfo> = {
 'Text': {type: 'std::string', defaultVal: ' = ""',    isString: true},
 'URL': {type: 'URL',          defaultVal: ' = ""',    isString: true},
 'Number': {type: 'double',    defaultVal: ' = 0',     isString: false},
+'BigInt': {type: 'long long', defaultVal: ' = 0',     isString: false},
 'Boolean': {type: 'bool',     defaultVal: ' = false', isString: false},
 'Reference': {type: '',       defaultVal: ' = {}',    isString: false},
 };
@@ -55,7 +56,7 @@ const typeMap: Dictionary<CppTypeInfo> = {
 function getTypeInfo(name: string): CppTypeInfo {
   const info = typeMap[name];
   if (!info) {
-    throw new Error(`Unhandled type '${name}' for kotlin.`);
+    throw new Error(`Unhandled type '${name}' for cpp.`);
   }
   return info;
 }
@@ -87,7 +88,7 @@ export class Schema2Cpp extends Schema2Base {
     return new CppGenerator(node, this.namespace.replace(/\./g, '::'));
   }
 
-  generateParticleClass(particle: ParticleSpec): string {
+  async generateParticleClass(particle: ParticleSpec): Promise<string> {
     const particleName = particle.name;
     const handleDecls: string[] = [];
 
@@ -118,16 +119,54 @@ protected:
 `;
   }
 
-  generateTestHarness(particle: ParticleSpec, nodes: SchemaNode[]): string {
+  async generateTestHarness(particle: ParticleSpec, nodes: SchemaNode[]): Promise<string> {
     throw new Error('Test Harness generation is not available for CPP');
   }
 }
 
-class CppSchemaDescriptor extends SchemaDescriptorBase {
+type AddFieldOptions = Readonly<{
+  field: string;
+  typeName: string;
+  isOptional?: boolean;
+  refClassName?: string;
+  refSchemaHash?: string;
+  listTypeInfo?: {name: string, refSchemaHash?: string, isInlineClass?: boolean};
+  isCollection?: boolean;
+  isInlineClass?: boolean;
+}>;
 
-  constructor(node: SchemaNode) {
-    super(node);
-    this.process();
+class CppEntityDescriptor {
+
+  constructor(readonly node: SchemaNode) {
+    for (const [field, descriptor] of Object.entries(this.node.schema.fields)) {
+      if (descriptor.kind === 'schema-primitive') {
+        if (['Text', 'URL', 'Number', 'BigInt', 'Boolean'].includes(descriptor.type)) {
+          this.addField({field, typeName: descriptor.type});
+        } else {
+          throw new Error(`Schema type '${descriptor.type}' for field '${field}' is not supported`);
+        }
+      } else if (descriptor.kind === 'schema-reference' || (descriptor.kind === 'schema-collection' && descriptor.schema.kind === 'schema-reference')) {
+        const isCollection = descriptor.kind === 'schema-collection';
+        const schemaNode = this.node.refs.get(field);
+        this.addField({
+          field,
+          typeName: 'Reference',
+          isCollection,
+          refClassName: schemaNode.entityClassName,
+          refSchemaHash: schemaNode.hash,
+        });
+      } else if (descriptor.kind === 'schema-collection') {
+        const schema = descriptor.schema;
+        if (schema.kind === 'schema-primitive') {
+          this.addField({field, typeName: schema.type, isCollection: true});
+        } else {
+          throw new Error(`Schema kind '${schema.kind}' for field '${field}' is not supported`);
+        }
+      }
+      else {
+        throw new Error(`Schema kind '${descriptor.kind}' for field '${field}' is not supported`);
+      }
+    }
   }
 
   fields: string[] = [];
@@ -212,10 +251,10 @@ class CppSchemaDescriptor extends SchemaDescriptorBase {
 
 class CppGenerator implements EntityGenerator {
 
-  private descriptor: CppSchemaDescriptor;
+  private descriptor: CppEntityDescriptor;
 
   constructor(readonly node: SchemaNode, readonly namespace: string) {
-    this.descriptor = new CppSchemaDescriptor(node);
+    this.descriptor = new CppEntityDescriptor(node);
   }
 
   typeFor(name: string): string {
@@ -228,7 +267,6 @@ class CppGenerator implements EntityGenerator {
 
   generate(): string {
     const name = this.node.fullEntityClassName;
-    console.log(`name: ${name}`);
     const aliases = this.node.sources.map(s => s.fullName);
     // Template constructor allows implicit type slicing from appropriately matching entities.
     let templateCtor = '';

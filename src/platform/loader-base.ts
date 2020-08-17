@@ -12,7 +12,7 @@ import {fetch} from './fetch-web.js';
 import {JsonldToManifest} from '../runtime/converters/jsonldToManifest.js';
 import {ParticleExecutionContext} from '../runtime/particle-execution-context.js';
 import {ClientReference} from '../runtime/reference.js';
-import {ParticleSpec} from '../runtime/particle-spec.js';
+import {ParticleSpec} from '../runtime/manifest-types/particle-spec.js';
 import {Particle} from '../runtime/particle.js';
 import {UiParticle} from '../runtime/ui-particle.js';
 import {UiTransformationParticle} from '../runtime/ui-transformation-particle.js';
@@ -25,7 +25,7 @@ import {Dictionary} from '../runtime/hot.js';
 import '../runtime/schema-from-literal.js';
 import '../runtime/type-from-literal.js';
 import '../runtime/handle-constructors.js';
-import '../runtime/storageNG/store-constructors.js';
+import '../runtime/storage/store-constructors.js';
 import '../runtime/entity-utils.js';
 import '../runtime/reference.js';
 import '../runtime/interface-info-impl.js';
@@ -88,7 +88,7 @@ export abstract class LoaderBase {
    * Test to determine if string matches JVM package / class naming convention:
    * https://docs.oracle.com/javase/tutorial/java/package/namingpkgs.html
    */
-  isJvmClasspath(candidate: string): boolean {
+  static isJvmClasspath(candidate: string): boolean {
     if (!candidate) return false;
 
     const isCapitalized = (s: string) => s[0] === s[0].toUpperCase();

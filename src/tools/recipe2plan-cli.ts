@@ -16,7 +16,8 @@ import {Flags} from '../runtime/flags.js';
 
 const opts = minimist(process.argv.slice(2), {
   string: ['outdir', 'outfile', 'format', 'recipe'],
-  alias: {d: 'outdir', f: 'outfile'},
+  boolean: ['quiet'],
+  alias: {d: 'outdir', f: 'outfile', q: 'quiet'},
   default: {outdir: '.', format: 'kotlin'}
 });
 
@@ -34,6 +35,8 @@ Options
   --format  output format, 'kotlin' or 'proto', defaults to 'kotlin'
   --recipe  a name of the recipe to turn into a plan. If not
             provided all recipes in the manifest will be encoded.
+  --policies a name of the manifest file containing policies
+  --quiet, -q  suppress log output
   --help        usage info
 `);
   process.exit(0);
@@ -70,10 +73,14 @@ void Flags.withDefaultReferenceMode(async () => {
     fs.mkdirSync(opts.outdir, {recursive: true});
 
     const manifest = await Runtime.parseFile(opts._[0]);
-    const plans = await recipe2plan(manifest, outFormat, opts.recipe);
+    const policiesManifest =
+        opts.policies ? await Runtime.parseFile(opts.policies) : null;
+    const plans = await recipe2plan(manifest, outFormat, policiesManifest, opts.recipe);
 
     const outPath = path.join(opts.outdir, opts.outfile);
-    console.log(outPath);
+    if (!opts.quiet) {
+      console.log(outPath);
+    }
 
     const outFile = fs.openSync(outPath, 'w');
     fs.writeSync(outFile, plans);

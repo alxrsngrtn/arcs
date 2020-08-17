@@ -13,11 +13,31 @@ particle KotlinPrimitivesGolden
     ref: &{val: Text},
     bt: Byte,
     shrt: Short,
-    nt: Int,
-    lng: Long,
+    integer: Int,
+    long_val: Long,
+    big: BigInt,
     chr: Char,
     flt: Float,
     dbl: Double,
     txtlst: List<Text>,
-    lnglst: List<Long>
-  }
+    lnglst: List<Long>,
+    thinglst: List<&Thing {name: Text}>,
+    detail: inline Detail {
+      nested: inline Nested {
+        txt: Text,
+        num: Number
+      },
+      txt: Text,
+      num: Number
+    },
+    colors: [inline Color {
+      red: Char,
+      green: Char,
+      blue: Char
+    }],
+    products: List<inline Product {
+       name: Text,
+      price: Float,
+      stock: Int
+    }>
+  } [(2n * big + 3n > 5n) and (5i*integer + 10i*integer > 30i) and (10l*long_val >= 100000l and 10l*long_val < 1000000l) and (num < 1000)]

@@ -32,7 +32,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.ConflatedBroadcastChannel
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 
 // import kotlinx.coroutines.flow.debounce
 // import kotlinx.coroutines.flow.filter
@@ -45,7 +45,7 @@ import kotlinx.coroutines.runBlocking
  */
 @Suppress("EXPERIMENTAL_API_USAGE")
 class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constructor(
-    options: StoreOptions<Data, Op, T>,
+    options: StoreOptions,
     /* internal */
     val localModel: CrdtModel<Data, Op, T>,
     /* internal */
@@ -83,6 +83,7 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
         "direct",
         Random
     )
+    private val scope = options.coroutineScope
 
     private val storeIdlenessFlow =
         combine(stateFlow, writebackIdlenessFlow) { state, writebackIsIdle ->
@@ -90,7 +91,11 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
         }
 
     override suspend fun idle() {
-        // TODO: tune the debounce window
+        /**
+         * TODO: tune the debounce window
+         * Once this is enabled, change [DirectStoreMuxer.idle] accordingly to use
+         * simultaneous launches.
+         */
         // storeIdlenessFlow.debounce(50).filter { it }.first()
     }
 
@@ -105,18 +110,14 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
     override fun off(callbackToken: Int) {
         synchronized(proxyManager) {
             proxyManager.unregister(callbackToken)
-            if (proxyManager.isEmpty()) {
-                closeInternal()
-            }
         }
     }
 
     /** Closes the store. Once closed, it cannot be re-opened. A new instance must be created. */
-    fun close() {
+    override fun close() {
         synchronized(proxyManager) {
-            if (proxyManager.isEmpty()) {
-                closeInternal()
-            }
+            proxyManager.callbacks.clear()
+            closeInternal()
         }
     }
 
@@ -127,8 +128,10 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
             stateChannel.close()
             state.value = State.Closed()
             closeWriteBack()
-            runBlocking {
-                driver.close()
+            requireNotNull(scope) {
+                "store driver cannot be closed properly due to missing coroutine scope"
+            }.run {
+                launch { driver.close() }
             }
         }
     }
@@ -198,7 +201,7 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
                 true
             }
         }.also {
-            log.debug { "Model after proxy message: ${localModel.data}" }
+            log.verbose { "Model after proxy message: ${localModel.data}" }
         }
     }
 
@@ -219,10 +222,10 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
     }
 
     /* internal */ suspend fun onReceive(data: Data, version: Int) {
-        log.debug { "onReceive($data, $version)" }
+        log.verbose { "onReceive($data, $version)" }
 
         if (state.value is State.Closed<Data> || closed) {
-            log.debug { "onReceive($data, $version) called after close(), ignoring" }
+            log.verbose { "onReceive($data, $version) called after close(), ignoring" }
             return
         }
 
@@ -240,16 +243,16 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
     private suspend fun applyPendingDriverModels(models: List<PendingDriverModel<Data>>) {
         if (models.isEmpty()) return
 
-        log.debug { "Applying ${models.size} pending models: $models" }
+        log.verbose { "Applying ${models.size} pending models: $models" }
 
         var noDriverSideChanges = true
         var theVersion = 0
         models.forEach { (model, version) ->
             try {
-                log.debug { "Merging $model into ${localModel.data}" }
+                log.verbose { "Merging $model into ${localModel.data}" }
                 val (modelChange, otherChange) = synchronized(this) { localModel.merge(model) }
-                log.debug { "ModelChange: $modelChange" }
-                log.debug { "OtherChange: $otherChange" }
+                log.verbose { "ModelChange: $modelChange" }
+                log.verbose { "OtherChange: $otherChange" }
                 theVersion = version
                 if (modelChange.isEmpty() && otherChange.isEmpty()) return@forEach
                 deliverCallbacks(modelChange, null)
@@ -260,7 +263,9 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
                 )
                 log.debug { "No driver side changes? $noDriverSideChanges" }
             } catch (e: Exception) {
-                log.error(e) { "Error while applying pending driver models." }
+                // TODO(b/160251910): Make logging detail more cleanly conditional.
+                log.debug(e) { "Error while applying pending driver models." }
+                log.info { "Error while applying pending driver models." }
                 idleDeferred.value.completeExceptionally(e)
                 throw e
             }
@@ -500,7 +505,7 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
 
         @Suppress("UNCHECKED_CAST")
         suspend fun <Data : CrdtData, Op : CrdtOperation, T> create(
-            options: StoreOptions<Data, Op, T>
+            options: StoreOptions
         ): DirectStore<Data, Op, T> {
             val crdtType = requireNotNull(options.type as CrdtModelType<Data, Op, T>) {
                 "Type not supported: ${options.type}"
@@ -514,13 +519,9 @@ class DirectStore<Data : CrdtData, Op : CrdtOperation, T> /* internal */ constru
                 ) as? Driver<Data>
             ) { "No driver exists to support storage key ${options.storageKey}" }
 
-            val localModel = crdtType.createCrdtModel().apply {
-                options.model?.let { merge(it) }
-            }
-
             return DirectStore(
                 options,
-                localModel = localModel,
+                localModel = crdtType.createCrdtModel(),
                 driver = driver
             ).also { store ->
                 driver.registerReceiver(options.versionToken) { data, version ->

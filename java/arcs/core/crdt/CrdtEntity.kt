@@ -160,9 +160,20 @@ class CrdtEntity(
             )
         } else {
             val resultData = data // call `data` only once, since it's nontrivial to copy.
+
+            // Check if there are no other changes.
+            val otherChangesEmpty =
+                singletonChanges.values.all { it.otherChange.isEmpty() } &&
+                    collectionChanges.values.all { it.otherChange.isEmpty() }
+            val otherChange: CrdtChange<Data, Operation> = if (otherChangesEmpty) {
+                CrdtChange.Operations(mutableListOf())
+            } else {
+                CrdtChange.Data(resultData)
+            }
+
             MergeChanges(
                 modelChange = CrdtChange.Data(resultData),
-                otherChange = CrdtChange.Data(resultData)
+                otherChange = otherChange
             )
         }
     }
@@ -182,12 +193,7 @@ class CrdtEntity(
                     it.applyOperation(CrdtSingleton.Operation.Clear(op.actor, versionMap))
                 }
                 _data.collections.values.forEach {
-                    collection ->
-                        collection.consumerView.forEach {
-                            collection.applyOperation(
-                                CrdtSet.Operation.Remove(op.actor, versionMap, it)
-                            )
-                        }
+                    it.applyOperation(CrdtSet.Operation.Clear(op.actor, versionMap))
                 }
                 _data.creationTimestamp = RawEntity.UNINITIALIZED_TIMESTAMP
                 _data.expirationTimestamp = RawEntity.UNINITIALIZED_TIMESTAMP
@@ -200,10 +206,6 @@ class CrdtEntity(
         } ?: throw CrdtException("Invalid op: $op.")
     }
 
-    override fun updateData(newData: Data) {
-        _data = newData.copy()
-    }
-
     private fun ISingletonOp<Reference>.toEntityOp(fieldName: FieldName): Operation = when (this) {
         is SingletonOp.Update -> Operation.SetSingleton(actor, clock, fieldName, value)
         is SingletonOp.Clear -> Operation.ClearSingleton(actor, clock, fieldName)
@@ -213,7 +215,7 @@ class CrdtEntity(
     private fun ISetOp<Reference>.toEntityOp(fieldName: FieldName): Operation = when (this) {
         is SetOp.Add -> Operation.AddToSet(actor, clock, fieldName, added)
         is SetOp.Remove -> Operation.RemoveFromSet(actor, clock, fieldName, removed)
-        else -> throw CrdtException("Cannot convert FastForward to CrdtEntity Operation")
+        else -> throw CrdtException("Cannot convert FastForward or Clear to CrdtEntity Operation")
     }
 
     /** Defines the type of data managed by [CrdtEntity] for its singletons and collections. */

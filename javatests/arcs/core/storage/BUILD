@@ -6,7 +6,7 @@ load(
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//java/arcs:allowed-packages"])
 
 TEST_SRCS = glob(["*Test.kt"])
 
@@ -17,6 +17,7 @@ arcs_kt_android_test_suite(
     package = "arcs.core.storage",
     deps = [
         ":fakes",
+        "//java/arcs/core/analytics",
         "//java/arcs/core/common",
         "//java/arcs/core/crdt",
         "//java/arcs/core/data",
@@ -27,11 +28,13 @@ arcs_kt_android_test_suite(
         "//java/arcs/core/storage/database",
         "//java/arcs/core/storage/driver",
         "//java/arcs/core/storage/keys",
+        "//java/arcs/core/storage/keys:protocols",
         "//java/arcs/core/storage/referencemode",
         "//java/arcs/core/storage/testutil",  # buildcleaner: keep
         "//java/arcs/core/testutil",
         "//java/arcs/core/type",
         "//java/arcs/core/util",
+        "//java/arcs/core/util:utils-platform-dependencies",
         "//java/arcs/core/util/testutil",
         "//java/arcs/jvm/storage/database/testutil",
         "//java/arcs/jvm/util",

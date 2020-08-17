@@ -7,7 +7,7 @@ load(
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//java/arcs:allowed-packages"])
 
 arcs_kt_android_test_suite(
     name = "host",
@@ -34,6 +34,7 @@ arcs_kt_android_test_suite(
         "//java/arcs/core/storage/keys",
         "//java/arcs/core/storage/referencemode",
         "//java/arcs/core/testutil",
+        "//java/arcs/core/testutil/handles",
         "//java/arcs/core/util",
         "//java/arcs/core/util/testutil",
         "//java/arcs/jvm/host",
@@ -83,6 +84,7 @@ arcs_kt_android_library(
         "//java/arcs/android/sdk/host",
         "//java/arcs/core/data",
         "//java/arcs/core/host",
+        "//java/arcs/core/storage",
         "//java/arcs/jvm/host",
         "//java/arcs/sdk",
         "//java/arcs/sdk/android/storage",
@@ -91,7 +93,6 @@ arcs_kt_android_library(
         "//javatests/arcs/core/host:particle",
         "//javatests/arcs/core/host:testhost",
         "//third_party/java/androidx/appcompat",
-        "//third_party/java/androidx/lifecycle",
         "//third_party/java/robolectric",
         "//third_party/kotlin/kotlinx_coroutines",
         "//third_party/kotlin/kotlinx_coroutines:kotlinx_coroutines_test",

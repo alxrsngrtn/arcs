@@ -11,14 +11,10 @@ import * as AstNode from '../manifest-ast-nodes.js';
 import {AnnotationRef} from '../recipe/annotation.js';
 import {assert} from '../../platform/assert-web.js';
 import {ManifestStringBuilder} from '../manifest-string-builder.js';
-import {Ttl} from '../capabilities.js';
+import {Ttl, Capabilities, Capability, Persistence, Encryption} from '../capabilities.js';
 import {EntityType, InterfaceType, Type} from '../type.js';
 import {FieldPathType, resolveFieldPathType} from '../field-path.js';
-
-export enum PolicyEgressType {
-  Logging = 'Logging',
-  FederatedAggregation = 'FederatedAggregation',
-}
+import {Schema} from '../schema.js';
 
 export enum PolicyRetentionMedium {
   Ram = 'Ram',
@@ -49,7 +45,7 @@ export class Policy {
       readonly targets: PolicyTarget[],
       readonly configs: PolicyConfig[],
       readonly description: string | null,
-      readonly egressType: PolicyEgressType | null,
+      readonly egressType: string | null,
       readonly customAnnotations: AnnotationRef[],
       private readonly allAnnotations: AnnotationRef[]) {}
 
@@ -77,7 +73,7 @@ export class Policy {
     // Process annotations.
     const allAnnotations = buildAnnotationRefs(node.annotationRefs);
     let description: string | null = null;
-    let egressType: PolicyEgressType | null = null;
+    let egressType: string | null = null;
     const customAnnotations: AnnotationRef[] = [];
     for (const annotation of allAnnotations) {
       switch (annotation.name) {
@@ -101,11 +97,9 @@ export class Policy {
     return annotation.params['description'] as string;
   }
 
-  private static toEgressType(annotation: AnnotationRef): PolicyEgressType {
+  private static toEgressType(annotation: AnnotationRef): string {
     assert(annotation.name === egressTypeAnnotationName);
-    const egressType = annotation.params['type'] as string;
-    checkValueInEnum(egressType, PolicyEgressType);
-    return egressType as PolicyEgressType;
+    return annotation.params['type'] as string;
   }
 }
 
@@ -185,6 +179,25 @@ export class PolicyTarget {
     const maxAge = annotation.params['age'] as string;
     return Ttl.fromString(maxAge);
   }
+
+  toCapabilities(): Capabilities[] {
+    return this.retentions.map(retention => {
+      const ranges: Capability[] = [];
+      switch (retention.medium) {
+        case PolicyRetentionMedium.Disk:
+          ranges.push(Persistence.onDisk());
+          break;
+        case PolicyRetentionMedium.Ram:
+          ranges.push(Persistence.inMemory());
+          break;
+        default:
+          throw new Error(`Unsupported retention medium ${retention.medium}`);
+      }
+      ranges.push(new Encryption(retention.encryptionRequired));
+      ranges.push(this.maxAge);
+      return Capabilities.create(ranges);
+    });
+  }
 }
 
 export class PolicyField {
@@ -206,7 +219,7 @@ export class PolicyField {
     if (this.subfields.length) {
       builder.push(`${this.name} {`);
       this.subfields.forEach(field => field.toManifestString(builder.withIndent()));
-      builder.push('}');
+      builder.push('},');
     } else {
       builder.push(`${this.name},`);
     }
@@ -266,6 +279,35 @@ export class PolicyField {
       usage: usageType as PolicyAllowedUsageType,
       label: label === 'raw' ? '' : label,
     };
+  }
+
+  private restrictField(field) {
+    switch (field.kind) {
+      case 'kotlin-primitive':
+      case 'schema-primitive': {
+        assert(this.subfields.length === 0);
+        return field;
+      }
+      case 'schema-collection': {
+        return {kind: 'schema-collection', schema: this.restrictField(field.schema)};
+      }
+      case 'schema-reference': {
+        const restrictedFields = {};
+        for (const subfield of this.subfields) {
+          restrictedFields[subfield.name] =
+              subfield.restrictField(field.schema.model.entitySchema.fields[subfield.name]);
+        }
+        return {kind: 'schema-reference', schema: {
+            ...field.schema,
+            model: {
+              entitySchema: new Schema(field.schema.model.entitySchema.names, restrictedFields)
+            }
+          }};
+      }
+      default:
+        assert(`Unsupported field kind: ${field.kind}`);
+    }
+    return [this.name, field];
   }
 }
 

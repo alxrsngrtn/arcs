@@ -10,10 +10,10 @@
 
 import {Manifest} from '../../manifest.js';
 import {assert} from '../../../platform/chai-web.js';
-import {PolicyEgressType, PolicyRetentionMedium, PolicyAllowedUsageType, Policy} from '../policy.js';
+import {PolicyRetentionMedium, PolicyAllowedUsageType} from '../policy.js';
 import {assertThrowsAsync} from '../../../testing/test-util.js';
 import {mapToDictionary} from '../../util.js';
-import {TtlUnits} from '../../capabilities.js';
+import {TtlUnits, Persistence, Encryption, Capabilities, Ttl} from '../../capabilities.js';
 
 const customAnnotation = `
 annotation custom
@@ -55,7 +55,7 @@ policy MyPolicy {
       @allowedUsage(label: 'redacted', usageType: '*')
       @custom
       age,
-    }
+    },
     @custom
     name,
   }
@@ -84,7 +84,7 @@ policy MyPolicy {}
 `);
     assert.strictEqual(policy.name, 'MyPolicy');
     assert.strictEqual(policy.description, 'test');
-    assert.strictEqual(policy.egressType, PolicyEgressType.Logging);
+    assert.strictEqual(policy.egressType, 'Logging');
     assert.lengthOf(policy.customAnnotations, 1);
     assert.strictEqual(policy.customAnnotations[0].name, 'custom');
   });
@@ -97,11 +97,12 @@ policy MyPolicy {}
     assert.isNull(policy.egressType);
   });
 
-  it('rejects unknown egress types', async () => {
-    await assertThrowsAsync(async () => parsePolicy(`
-@egressType('SomethingElse')
+  it('allows arbitrary egress types', async () => {
+    const policy = await parsePolicy(`
+@egressType('SomeInventedEgressType')
 policy MyPolicy {}
-`), 'Expected one of: Logging, FederatedAggregation. Found: SomethingElse.');
+`);
+    assert.strictEqual(policy.egressType, 'SomeInventedEgressType');
   });
 
   it('policy target annotations work', async () => {
@@ -338,5 +339,24 @@ policy MyPolicy {
   config Abc {}
   config Abc {}
 }`), `A definition for 'Abc' already exists.`);
+  });
+
+  it('converts to capabilities', async () => {
+    const target = (await parsePolicy(`
+policy MyPolicy {
+  @allowedRetention(medium: 'Disk', encryption: true)
+  @allowedRetention(medium: 'Ram', encryption: false)
+  @maxAge('2d')
+  @custom
+  from Person access {}
+}`)).targets[0];
+    const capabilities = target.toCapabilities();
+    assert.lengthOf(capabilities, 2);
+    assert.isTrue(capabilities[0].isEquivalent(Capabilities.create([
+        Persistence.onDisk(), new Encryption(true), Ttl.days(2)])),
+        `Unexpected capabilities: ${capabilities[0].toDebugString()}`);
+    assert.isTrue(capabilities[1].isEquivalent(
+        Capabilities.create([Persistence.inMemory(), new Encryption(false), Ttl.days(2)])),
+        `Unexpected capabilities: ${capabilities[1].toDebugString()}`);
   });
 });

@@ -29,16 +29,21 @@ sealed class FieldType(
 
     /** A tuple of [FieldType]s */
     data class Tuple(val types: List<FieldType>) : FieldType(Tag.Tuple) {
+        constructor(vararg types: FieldType) : this(types.toList())
+
         override fun toString() = "(${types.joinToString()})"
     }
 
     data class ListOf(val primitiveType: FieldType) : FieldType(Tag.List)
 
+    data class InlineEntity(val schemaHash: String) : FieldType(Tag.InlineEntity)
+
     enum class Tag {
         Primitive,
         EntityRef,
         Tuple,
-        List
+        List,
+        InlineEntity
     }
 
     // Convenient aliases for all of the primitive field types.
@@ -107,5 +112,9 @@ data class SchemaFields(
             ).flatten().joinToString()
         }
         return "{$fields}"
+    }
+
+    companion object {
+        val EMPTY = SchemaFields(singletons = emptyMap(), collections = emptyMap())
     }
 }

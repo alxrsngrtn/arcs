@@ -5,20 +5,24 @@ import arcs.core.data.EntityType
 import arcs.core.data.HandleMode
 import arcs.core.data.RawEntity
 import arcs.core.data.Schema
+import arcs.core.data.SchemaRegistry
 import arcs.core.host.EntityHandleManager
 import arcs.core.storage.DriverFactory
-import arcs.core.storage.api.DriverAndKeyConfigurator
-import arcs.core.storage.Reference as StorageReference
 import arcs.core.storage.RawEntityDereferencer
+import arcs.core.storage.Reference as StorageReference
 import arcs.core.storage.StoreManager
+import arcs.core.storage.api.DriverAndKeyConfigurator
 import arcs.core.storage.driver.RamDisk
 import arcs.core.storage.keys.RamDiskStorageKey
 import arcs.core.storage.referencemode.ReferenceModeStorageKey
+import arcs.core.testutil.handles.dispatchCreateReference
+import arcs.core.testutil.handles.dispatchStore
 import arcs.core.testutil.runTest
 import arcs.core.util.Scheduler
 import arcs.core.util.testutil.LogRule
 import arcs.jvm.util.testutil.FakeTime
 import com.google.common.truth.Truth.assertThat
+import java.util.concurrent.Executors
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
 import org.junit.After
@@ -27,7 +31,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
-import java.util.concurrent.Executors
 
 @ExperimentalCoroutinesApi
 @RunWith(JUnit4::class)
@@ -52,6 +55,7 @@ class ReferenceTest {
         RamDisk.clear()
         DriverAndKeyConfigurator.configure(null)
         SchemaRegistry.register(DummyEntity.SCHEMA)
+        SchemaRegistry.register(InlineDummyEntity.SCHEMA)
 
         scheduler = Scheduler(Executors.newSingleThreadExecutor().asCoroutineDispatcher())
         stores = StoreManager()
@@ -69,7 +73,7 @@ class ReferenceTest {
                 "testHandle",
                 HandleMode.ReadWrite,
                 CollectionType(EntityType(DummyEntity.SCHEMA)),
-                setOf<EntitySpec<*>>(DummyEntity)
+                DummyEntity
             ),
             STORAGE_KEY
         ) as ReadWriteCollectionHandle<DummyEntity>
@@ -87,14 +91,14 @@ class ReferenceTest {
     }
 
     @Test
-    fun dereference() = runTest(handle.dispatcher) {
+    fun dereference() = runTest {
         val entity = DummyEntity().apply {
             text = "Watson"
             num = 6.0
         }
-        handle.store(entity).join()
+        handle.dispatchStore(entity)
 
-        val reference = handle.createReference(entity)
+        val reference = handle.dispatchCreateReference(entity)
         val entityOut = reference.dereference()
 
         assertThat(entityOut).isEqualTo(entity)

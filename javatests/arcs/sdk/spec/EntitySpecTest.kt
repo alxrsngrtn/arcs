@@ -1,18 +1,19 @@
 package arcs.sdk.spec
 
 import arcs.core.common.Id
+import arcs.core.data.Capability.Ttl
 import arcs.core.data.RawEntity
 import arcs.core.data.RawEntity.Companion.NO_REFERENCE_ID
-import arcs.core.data.Ttl
+import arcs.core.data.SchemaRegistry
 import arcs.core.data.util.toReferencable
-import arcs.core.entity.SchemaRegistry
+import arcs.core.testutil.handles.dispatchCreateReference
+import arcs.core.testutil.handles.dispatchStore
 import arcs.core.testutil.runTest
 import arcs.core.util.testutil.LogRule
 import arcs.jvm.util.testutil.FakeTime
 import arcs.sdk.Reference
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.withContext
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -143,7 +144,7 @@ class EntitySpecTest {
         assertThat(creationTimestamp).isEqualTo(currentTime)
 
         // Calling it again doesn't overwrite id and timestamp.
-        entity.ensureEntityFields(idGenerator, "something-else", FakeTime(currentTime+10))
+        entity.ensureEntityFields(idGenerator, "something-else", FakeTime(currentTime + 10))
         assertThat(entity.entityId).isEqualTo(entityId)
         assertThat(entity.serialize().creationTimestamp).isEqualTo(creationTimestamp)
     }
@@ -151,11 +152,11 @@ class EntitySpecTest {
     @Test
     fun expiryTimestamp() {
         val entity = Foo()
-        
+
         entity.ensureEntityFields(idGenerator, "handle", FakeTime(currentTime), Ttl.Minutes(1))
-        
+
         val expirationTimestamp = entity.serialize().expirationTimestamp
-        assertThat(expirationTimestamp).isEqualTo(currentTime + 60000) // 1 minute = 60'000 milliseconds
+        assertThat(expirationTimestamp).isEqualTo(currentTime + 60000) // 1 minute = 60,000 ms.
     }
 
     @Test
@@ -306,10 +307,18 @@ class EntitySpecTest {
                     "texts" to setOf("def".toReferencable(), "ghi".toReferencable()),
                     "refs" to setOf(ref2.toReferencable(), ref3.toReferencable()),
                     "bts" to setOf(23.toByte().toReferencable(), 34.toByte().toReferencable()),
-                    "shrts" to setOf(234.toShort().toReferencable(), 345.toShort().toReferencable()),
+                    "shrts" to setOf(
+                        234.toShort().toReferencable(),
+                        345.toShort().toReferencable()
+                    ),
                     "nts" to setOf(234567.toReferencable(), 345678.toReferencable()),
                     "lngs" to setOf(1L.toReferencable(), 1234567890123L.toReferencable()),
-                    "chrs" to setOf('A'.toReferencable(), 'R'.toReferencable(), 'C'.toReferencable(), 'S'.toReferencable()),
+                    "chrs" to setOf(
+                        'A'.toReferencable(),
+                        'R'.toReferencable(),
+                        'C'.toReferencable(),
+                        'S'.toReferencable()
+                    ),
                     "flts" to setOf(2.3f.toReferencable(), 3.4f.toReferencable()),
                     "dbls" to setOf(2.3E200.toReferencable(), 3.4E100.toReferencable())
                 ),
@@ -330,11 +339,10 @@ class EntitySpecTest {
      * Stores the given [Bar] entity in a collection, and then creates and returns a reference to
      * it.
      */
-    private suspend fun createBarReference(bar: Bar): Reference<Bar> =
-        withContext(harness.bars.dispatcher) {
-            harness.bars.store(bar)
-            harness.bars.createReference(bar)
-        }
+    private suspend fun createBarReference(bar: Bar): Reference<Bar> {
+        harness.bars.dispatchStore(bar)
+        return harness.bars.dispatchCreateReference(bar)
+    }
 
     /** Generates and returns an ID for the entity. */
     private fun (Foo).identify(): String {

@@ -1,15 +1,15 @@
 package arcs.core.entity
 
 import arcs.core.crdt.VersionMap
+import arcs.core.data.SchemaRegistry
 import arcs.core.storage.testutil.DummyStorageKey
 import com.google.common.truth.Truth.assertThat
+import kotlin.test.assertFailsWith
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
-import kotlin.test.assertFailsWith
-
 
 @RunWith(JUnit4::class)
 @Suppress("UNCHECKED_CAST")
@@ -22,6 +22,7 @@ class VariableEntityBaseTest {
     fun setUp() {
         SchemaRegistry.register(DummyEntity.SCHEMA)
         SchemaRegistry.register(DummyVariableEntity.SCHEMA)
+        SchemaRegistry.register(InlineDummyEntity.SCHEMA)
         entity = DummyVariableEntity()
         biggerEntity = DummyEntity()
             .apply {
@@ -34,7 +35,6 @@ class VariableEntityBaseTest {
                 bools = setOf(true, false)
                 refs = setOf(createDummyReference("ref1"), createDummyReference("ref2"))
             }
-
     }
 
     @After
@@ -73,7 +73,8 @@ class VariableEntityBaseTest {
             variableEntity.getSingletonValue("num")
         }
         assertThat(e).hasMessageThat().isEqualTo(
-            "${DummyVariableEntity.ENTITY_CLASS_NAME} does not have a singleton field called \"num\"."
+            "${DummyVariableEntity.ENTITY_CLASS_NAME} does not have a singleton field " +
+                "called \"num\"."
         )
     }
 
@@ -85,7 +86,7 @@ class VariableEntityBaseTest {
         variableEntity.deserializeForTest(biggerRaw)
 
         val copy = DummyVariableEntity()
-        with (copy) {
+        with(copy) {
             bools = variableEntity.bools
             nums = variableEntity.nums
             ref = variableEntity.ref

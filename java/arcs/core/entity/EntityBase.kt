@@ -13,13 +13,15 @@ package arcs.core.entity
 
 import arcs.core.common.Id
 import arcs.core.common.Referencable
+import arcs.core.data.Capability.Ttl
 import arcs.core.data.FieldType
 import arcs.core.data.PrimitiveType
 import arcs.core.data.RawEntity
 import arcs.core.data.RawEntity.Companion.NO_REFERENCE_ID
 import arcs.core.data.RawEntity.Companion.UNINITIALIZED_TIMESTAMP
 import arcs.core.data.Schema
-import arcs.core.data.Ttl
+import arcs.core.data.SchemaHash
+import arcs.core.data.SchemaRegistry
 import arcs.core.data.util.ReferencableList
 import arcs.core.data.util.ReferencablePrimitive
 import arcs.core.data.util.toReferencable
@@ -33,7 +35,8 @@ open class EntityBase(
     private val schema: Schema,
     entityId: String? = null,
     creationTimestamp: Long = UNINITIALIZED_TIMESTAMP,
-    expirationTimestamp: Long = UNINITIALIZED_TIMESTAMP
+    expirationTimestamp: Long = UNINITIALIZED_TIMESTAMP,
+    private val isInlineEntity: Boolean = false
 ) : Entity {
     /**
      * Only this class should be able to change these fields (in the [deserialize] and
@@ -216,6 +219,15 @@ open class EntityBase(
                 }
                 value.forEach { checkType(field, it, type.primitiveType, "member of ") }
             }
+            is FieldType.InlineEntity -> {
+                require(value is EntityBase) {
+                    "Expected EntityBase for $context#entityClassName.$field, but received $value."
+                }
+                require(value.schema.hash == type.schemaHash) {
+                    "Expected EntityBase type to have schema hash ${type.schemaHash} but had " +
+                        "schema hash ${value.schema.hash}."
+                }
+            }
         }
     }
 
@@ -230,19 +242,35 @@ open class EntityBase(
         schema.fields.collections.keys.forEach { collections[it] = emptySet() }
     }
 
-    override fun serialize() = RawEntity(
-        id = entityId ?: NO_REFERENCE_ID,
-        singletons = singletons.mapValues { (field, value) ->
-            value?.let { toReferencable(it, getSingletonType(field)) }
-        },
-        collections = collections.mapValues { (field, values) ->
-            val type = getCollectionType(field)
-            values.map { toReferencable(it, type) }.toSet()
-        },
-        creationTimestamp = creationTimestamp,
-        expirationTimestamp = expirationTimestamp
-    )
-
+    override fun serialize(storeSchema: Schema?): RawEntity {
+        val serializationFields = storeSchema?.fields ?: schema.fields
+        val serialization = RawEntity(
+            id = entityId ?: NO_REFERENCE_ID,
+            singletons = serializationFields.singletons.keys.intersect(
+                schema.fields.singletons.keys
+            ).map { field ->
+                field to getSingletonValue(field)?.let {
+                    toReferencable(it, getSingletonType(field))
+                }
+            }.toMap(),
+            collections = serializationFields.collections.keys.intersect(
+                schema.fields.collections.keys
+            ).map { field ->
+                val type = getCollectionType(field)
+                field to getCollectionValue(field).map { toReferencable(it, type) }.toSet()
+            }.toMap(),
+            creationTimestamp = creationTimestamp,
+            expirationTimestamp = expirationTimestamp
+        )
+        /**
+         * Inline entities should have value equality, but we use the id to determine
+         * equality when adding entities to CRDT collections/singletons.
+         */
+        if (isInlineEntity) {
+            return serialization.copy(id = serialization.hashCode().toString())
+        }
+        return serialization
+    }
     /**
      * Populates the entity from the given [RawEntity] serialization. Must only be called on a
      * fresh, empty instance.
@@ -257,7 +285,7 @@ open class EntityBase(
         rawEntity: RawEntity,
         nestedEntitySpecs: Map<SchemaHash, EntitySpec<out Entity>> = mapOf()
     ) {
-        entityId = if (rawEntity.id == NO_REFERENCE_ID) null else rawEntity.id
+        entityId = if (rawEntity.id == NO_REFERENCE_ID || isInlineEntity) null else rawEntity.id
         rawEntity.singletons.forEach { (field, value) ->
             getSingletonTypeOrNull(field)?.let { type ->
                 setSingletonValue(
@@ -294,7 +322,7 @@ open class EntityBase(
         val now = time.currentTimeMillis
         if (creationTimestamp == UNINITIALIZED_TIMESTAMP) {
             creationTimestamp = now
-            if (ttl != Ttl.Infinite) {
+            if (ttl != Ttl.Infinite()) {
                 expirationTimestamp = ttl.calculateExpiration(time)
             }
         }
@@ -374,6 +402,7 @@ private fun toReferencable(value: Any, type: FieldType): Referencable = when (ty
         (value as List<*>).map {
             toReferencable(it!!, type.primitiveType)
         }.toReferencable(type)
+    is FieldType.InlineEntity -> (value as EntityBase).serialize()
 }
 
 private fun fromReferencable(
@@ -410,6 +439,15 @@ private fun fromReferencable(
                 "ReferencableList encoded an unexpected null value."
             }
             referencable.value.map { fromReferencable(it, type.primitiveType, nestedEntitySpecs) }
+        }
+        is FieldType.InlineEntity -> {
+            require(referencable is RawEntity) {
+                "Expected RawEntity but was $referencable."
+            }
+            val entitySpec = requireNotNull(nestedEntitySpecs[type.schemaHash]) {
+                "Unknown schema with hash ${type.schemaHash}."
+            }
+            entitySpec.deserialize(referencable)
         }
     }
 }

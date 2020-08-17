@@ -8,8 +8,6 @@ import arcs.core.data.Recipe
 import arcs.core.data.TypeVariable
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
-import org.junit.Assert.assertTrue
-import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
@@ -28,7 +26,7 @@ class RecipeGraphTest {
             name = "joined",
             fate = Recipe.Handle.Fate.JOIN,
             type = TypeVariable("joined"),
-            associatedHandles=listOf(thingHandle, someHandle)
+            associatedHandles = listOf(thingHandle, someHandle)
         )
         val readConnectionSpec = HandleConnectionSpec(
             "r",
@@ -69,19 +67,44 @@ class RecipeGraphTest {
         val readerParticle = Recipe.Particle(
             readerSpec,
             listOf(
-                Recipe.Particle.HandleConnection(readConnectionSpec, thingHandle),
-                Recipe.Particle.HandleConnection(readSomeConnectionSpec, someHandle),
-                Recipe.Particle.HandleConnection(readJoinConnectionSpec, joinedHandle)
+                Recipe.Particle.HandleConnection(
+                    readConnectionSpec,
+                    thingHandle,
+                    TypeVariable("thing")
+                ),
+                Recipe.Particle.HandleConnection(
+                    readSomeConnectionSpec,
+                    someHandle,
+                    TypeVariable("some")
+                ),
+                Recipe.Particle.HandleConnection(
+                    readJoinConnectionSpec,
+                    joinedHandle,
+                    TypeVariable("joined")
+                )
             )
         )
         val writerParticle = Recipe.Particle(
             writerSpec,
             listOf(
-                Recipe.Particle.HandleConnection(writeConnectionSpec, thingHandle),
-                Recipe.Particle.HandleConnection(readConnectionSpec, thingHandle),
-                Recipe.Particle.HandleConnection(rwConnectionSpec, thingHandle)
+                Recipe.Particle.HandleConnection(
+                    writeConnectionSpec,
+                    thingHandle,
+                    TypeVariable("thing")
+                ),
+                Recipe.Particle.HandleConnection(
+                    readConnectionSpec,
+                    thingHandle,
+                    TypeVariable("thing")
+                ),
+                Recipe.Particle.HandleConnection(
+                    rwConnectionSpec,
+                    thingHandle,
+                    TypeVariable("thing")
+                )
             )
         )
+
         /**
          * Defines the following recipe (similarly for query modes):
          *    recipe PassThrough
@@ -101,13 +124,13 @@ class RecipeGraphTest {
             "PassThrough",
             listOf(thingHandle, someHandle, joinedHandle).associateBy { it.name },
             listOf(readerParticle, writerParticle),
-            listOf(Annotation.arcId("arcId"))
+            listOf(Annotation.createArcId("arcId"))
         )
     }
 
     @Test
     fun addSuccessorUpdatesPredecessorOfSuccessor() {
-        with (TestRecipe()) {
+        with(TestRecipe()) {
             val particleNode = RecipeGraph.Node.Particle(readerParticle)
             val handleNode = RecipeGraph.Node.Handle(thingHandle)
             particleNode.addSuccessor(handleNode, readConnectionSpec)
@@ -119,7 +142,7 @@ class RecipeGraphTest {
 
     @Test
     fun prettyPrintNodes() {
-        with (TestRecipe()) {
+        with(TestRecipe()) {
             val particleNode = RecipeGraph.Node.Particle(readerParticle)
             val handleNode = RecipeGraph.Node.Handle(thingHandle)
 
@@ -129,7 +152,7 @@ class RecipeGraphTest {
     }
 
     private fun testAllConnections(testRecipe: TestRecipe) {
-        with (testRecipe) {
+        with(testRecipe) {
             val graph = RecipeGraph(recipe)
             val readerNode = RecipeGraph.Node.Particle(readerParticle)
             val writerNode = RecipeGraph.Node.Particle(writerParticle)
@@ -189,10 +212,10 @@ class RecipeGraphTest {
             assertThat(graph.nodes)
                 .containsExactly(readerNode, writerNode, thingNode, joinedNode, someNode)
             graph.nodes.forEach {
-                assertWithMessage("Checking successors of ${it}:")
+                assertWithMessage("Checking successors of $it:")
                     .that(it.successors)
                     .containsExactlyElementsIn(requireNotNull(expectedSuccessors[it]))
-                assertWithMessage("Checking predecessors of ${it}:")
+                assertWithMessage("Checking predecessors of $it:")
                     .that(it.predecessors)
                     .containsExactlyElementsIn(requireNotNull(expectedPredecessors[it]))
             }
@@ -203,6 +226,29 @@ class RecipeGraphTest {
     fun graphContainsAllConnections() {
         setOf(TestRecipe(queryMode = false), TestRecipe(queryMode = true)).forEach {
             testAllConnections(it)
+        }
+    }
+
+    @Test
+    fun particleNodes() {
+        with(TestRecipe()) {
+            val graph = RecipeGraph(recipe)
+            assertThat(graph.particleNodes.map { it.particle }).containsExactly(
+                readerParticle,
+                writerParticle
+            )
+        }
+    }
+
+    @Test
+    fun handleNodes() {
+        with(TestRecipe()) {
+            val graph = RecipeGraph(recipe)
+            assertThat(graph.handleNodes.map { it.handle }).containsExactly(
+                thingHandle,
+                someHandle,
+                joinedHandle
+            )
         }
     }
 }

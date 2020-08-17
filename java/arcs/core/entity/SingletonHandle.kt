@@ -14,22 +14,20 @@ import arcs.core.common.Referencable
 import arcs.core.crdt.CrdtSingleton
 import arcs.core.data.RawEntity
 import arcs.core.storage.StorageProxy
-import arcs.core.storage.StoreOptions
 import kotlinx.coroutines.Job
 
-typealias SingletonProxy<T> = StorageProxy<SingletonData<T>, SingletonOp<T>, T?>
 typealias SingletonData<T> = CrdtSingleton.Data<T>
 typealias SingletonOp<T> = CrdtSingleton.IOperation<T>
-typealias SingletonStoreOptions<T> = StoreOptions<SingletonData<T>, SingletonOp<T>, T?>
+typealias SingletonProxy<T> = StorageProxy<SingletonData<T>, SingletonOp<T>, T?>
 
 /**
  * This class implements all of the methods that are needed by the various singleton [Handle]
  * interfaces:
  * * [Handle]
- * * [ReadableHandle<T>]
- * * [ReadSingletonHandle<T>]
- * * [WriteSingletonHandle<T>]
- * * [ReadWriteSingletonHandle<T>]
+ * * [ReadableHandle]
+ * * [ReadSingletonHandle]
+ * * [WriteSingletonHandle]
+ * * [ReadWriteSingletonHandle]
  *
  * It manages the storage and retrieval of items of the specified [Entity] type, including
  * their conversion to and from the backing [RawEntity] type that the storage layer requires.
@@ -75,8 +73,10 @@ class SingletonHandle<T : Storable, R : Referencable>(
     // endregion
 
     // region implement ReadableHandle<T>
-    override fun onUpdate(action: (T?) -> Unit) =
-        storageProxy.addOnUpdate(callbackIdentifier) { action(adaptValue(it)) }
+    override fun onUpdate(action: (SingletonDelta<T>) -> Unit) =
+        storageProxy.addOnUpdate(callbackIdentifier) { oldValue, newValue ->
+            action(SingletonDelta(adaptValue(oldValue), adaptValue(newValue)))
+        }
 
     override fun onDesync(action: () -> Unit) =
         storageProxy.addOnDesync(callbackIdentifier, action)
@@ -88,7 +88,7 @@ class SingletonHandle<T : Storable, R : Referencable>(
         val entityId = requireNotNull(entity.entityId) {
             "Entity must have an ID before it can be referenced."
         }
-        adaptValue(storageProxy.getParticleView()).let {
+        adaptValue(storageProxy.getParticleViewUnsafe()).let {
             require(it is Entity && it.entityId == entityId) {
                 "Entity is not stored in the Singleton."
             }

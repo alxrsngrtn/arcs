@@ -15,11 +15,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import arcs.android.storage.decodeProxyMessage
 import arcs.android.storage.toProto
 import arcs.core.crdt.CrdtCount
-import arcs.core.crdt.VersionMap
 import arcs.core.data.CountType
 import arcs.core.storage.ProxyMessage
 import arcs.core.storage.StorageKey
-import arcs.core.storage.Store
 import arcs.core.storage.StoreOptions
 import arcs.core.storage.StoreWriteBack
 import arcs.core.storage.driver.RamDisk
@@ -28,19 +26,17 @@ import arcs.core.storage.keys.RamDiskStorageKey
 import arcs.core.storage.testutil.WriteBackForTesting
 import arcs.core.util.testutil.LogRule
 import com.google.common.truth.Truth.assertThat
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -55,7 +51,7 @@ class BindingContextTest {
     val log = LogRule()
 
     private lateinit var bindingContextScope: CoroutineScope
-    private lateinit var store: Store<CrdtCount.Data, CrdtCount.Operation, Int>
+    private lateinit var store: DeferredStore<CrdtCount.Data, CrdtCount.Operation, Int>
     private lateinit var storageKey: StorageKey
 
     @Before
@@ -65,7 +61,7 @@ class BindingContextTest {
         RamDisk.clear()
         StoreWriteBack.writeBackFactoryOverride = WriteBackForTesting
         storageKey = RamDiskStorageKey("myCount")
-        store = Store(
+        store = DeferredStore(
             StoreOptions(
                 storageKey,
                 CountType()
@@ -84,6 +80,7 @@ class BindingContextTest {
         store,
         bindingContextScope.coroutineContext,
         BindingContextStatsImpl(),
+        null,
         callback
     )
 
@@ -102,7 +99,7 @@ class BindingContextTest {
             id = null
         )
 
-        val messageSend = launch(Dispatchers.IO) { store.activate().onProxyMessage(message) }
+        val messageSend = launch(Dispatchers.IO) { store().onProxyMessage(message) }
 
         log("waiting for message-send to finish")
         withTimeout(5000) { messageSend.join() }
@@ -136,7 +133,7 @@ class BindingContextTest {
             ),
             id = null
         )
-        assertThat(store.activate().onProxyMessage(message)).isTrue()
+        assertThat(store().onProxyMessage(message)).isTrue()
 
         assertThat(callback.isCompleted).isEqualTo(false)
     }

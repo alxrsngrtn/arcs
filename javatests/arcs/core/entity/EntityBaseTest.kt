@@ -13,13 +13,14 @@ package arcs.core.entity
 
 import arcs.core.common.Id
 import arcs.core.crdt.VersionMap
+import arcs.core.data.Capability.Ttl
 import arcs.core.data.RawEntity
 import arcs.core.data.Schema
 import arcs.core.data.SchemaFields
-import arcs.core.data.Ttl
+import arcs.core.data.SchemaRegistry
 import arcs.core.data.util.toReferencable
-import arcs.core.storage.testutil.DummyStorageKey
 import arcs.core.storage.Reference as StorageReference
+import arcs.core.storage.testutil.DummyStorageKey
 import arcs.jvm.util.testutil.FakeTime
 import com.google.common.truth.Truth.assertThat
 import kotlin.test.assertFailsWith
@@ -37,6 +38,7 @@ class EntityBaseTest {
     @Before
     fun setUp() {
         SchemaRegistry.register(DummyEntity.SCHEMA)
+        SchemaRegistry.register(InlineDummyEntity.SCHEMA)
         entity = DummyEntity()
     }
 
@@ -246,7 +248,7 @@ class EntityBaseTest {
 
     @Test
     fun serializeRoundTrip() {
-        with (entity) {
+        with(entity) {
             text = "abc"
             num = 12.0
             bool = true
@@ -357,7 +359,7 @@ class EntityBaseTest {
 
     @Test
     fun reset() {
-        with (entity) {
+        with(entity) {
             text = "abc"
             num = 12.0
             bool = true
@@ -377,7 +379,12 @@ class EntityBaseTest {
         assertThat(entity.entityId).isNull()
 
         // Calling once generates a new ID.
-        entity.ensureEntityFields(Id.Generator.newForTest("session1"), "handle2", FakeTime(10), Ttl.Minutes(1))
+        entity.ensureEntityFields(
+            Id.Generator.newForTest("session1"),
+            "handle2",
+            FakeTime(10),
+            Ttl.Minutes(1)
+        )
         val id = entity.entityId
         assertThat(id).isNotNull()
         assertThat(id).isNotEmpty()
@@ -414,7 +421,7 @@ class EntityBaseTest {
 
     @Test
     fun testToString() {
-        with (entity) {
+        with(entity) {
             text = "abc"
             num = 12.0
             bool = true
@@ -424,8 +431,10 @@ class EntityBaseTest {
             bools = setOf(true, false)
         }
         assertThat(entity.toString()).isEqualTo(
-            "DummyEntity(bool = true, bools = [true, false], num = 12.0, nums = [1.0, 2.0], " +
-                "primList = [1.0, 1.0], ref = null, refList = null, refs = [], text = abc, texts = [aa, bb])"
+            "DummyEntity(bool = true, bools = [true, false], inlineEntity = null, " +
+                "inlineList = null, inlines = [], num = 12.0, nums = [1.0, 2.0], " +
+                "primList = [1.0, 1.0], ref = null, refList = null, refs = [], text = abc, " +
+                "texts = [aa, bb])"
         )
     }
 

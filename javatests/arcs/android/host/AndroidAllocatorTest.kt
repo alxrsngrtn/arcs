@@ -18,20 +18,23 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import arcs.android.host.prod.ProdArcHostService
 import arcs.android.sdk.host.toComponentName
 import arcs.core.allocator.AllocatorTestBase
-import arcs.core.host.TestingJvmProdHost
 import arcs.core.data.Capabilities
+import arcs.core.data.Capability.Shareable
 import arcs.core.host.ArcHostException
-import arcs.core.host.ArcState
 import arcs.core.host.HostRegistry
 import arcs.core.host.PersonPlan
+import arcs.core.host.TestingJvmProdHost
 import arcs.core.testutil.assertSuspendingThrows
 import arcs.sdk.android.storage.service.testutil.TestConnectionFactory
-import com.google.common.truth.Truth
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Before
 import org.junit.Ignore
 import org.junit.Test
@@ -81,12 +84,17 @@ open class AndroidAllocatorTest : AllocatorTestBase() {
     override fun pureHost() = testProdService.arcHost as TestingJvmProdHost
 
     // TODO: wire up some kind of mock persistent database?
-    override val storageCapability = Capabilities.TiedToRuntime
+    override val storageCapability = Capabilities(Shareable(true))
+
+    class DefaultProdArcHostServiceForTest : ProdArcHostService() {
+        override val coroutineContext = Dispatchers.Default
+        override val arcSerializationCoroutineContext = Dispatchers.Default
+    }
 
     @Before
     override fun setUp() = runBlocking {
         context = ApplicationProvider.getApplicationContext()
-        context.setTheme(R.style.Theme_AppCompat);
+        context.setTheme(R.style.Theme_AppCompat)
 
         // Initialize WorkManager for instrumentation tests.
         WorkManagerTestInitHelper.initializeTestWorkManager(context)
@@ -95,7 +103,7 @@ open class AndroidAllocatorTest : AllocatorTestBase() {
         readingService = Robolectric.setupService(TestReadingExternalHostService::class.java)
         writingService = Robolectric.setupService(TestWritingExternalHostService::class.java)
         testProdService = Robolectric.setupService(TestProdArcHostService::class.java)
-        prodService = Robolectric.setupService(ProdArcHostService::class.java)
+        prodService = Robolectric.setupService(DefaultProdArcHostServiceForTest::class.java)
 
         super.setUp()
     }
@@ -168,5 +176,37 @@ open class AndroidAllocatorTest : AllocatorTestBase() {
     @Test
     override fun allocator_canStopArcInTwoExternalHosts() {
         super.allocator_canStopArcInTwoExternalHosts()
+    }
+
+    @Ignore("b/157266444 - Deflake")
+    @Test
+    override fun allocator_startArc_particleException_failsWaitForStart() {
+        super.allocator_startArc_particleException_failsWaitForStart()
+    }
+
+    @Test
+    fun arc_testHandlerRegistrationRace() = runAllocatorTest {
+        val waitForIteration = CompletableDeferred<Unit>()
+        val arc = allocator.startArcForPlan(PersonPlan)
+        arc.waitForStart()
+        // Block the list iteration when firing
+        arc.onStopped {
+            runBlocking {
+                delay(1000)
+                waitForIteration.complete(Unit)
+            }
+        }
+
+        // Trigger the handler iteration
+        arc.stop()
+
+        // launch a new registration in parallel, causes ConcurrentModificationException
+        withContext(Dispatchers.IO) {
+            async {
+                waitForIteration.await()
+                arc.onStopped {
+                }
+            }
+        }
     }
 }

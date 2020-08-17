@@ -19,7 +19,7 @@ import {Runnable} from './hot.js';
 import {Loader} from '../platform/loader.js';
 import {ManifestMeta} from './manifest-meta.js';
 import * as AstNode from './manifest-ast-nodes.js';
-import {ParticleSpec} from './particle-spec.js';
+import {ParticleSpec} from './manifest-types/particle-spec.js';
 import {compareComparables} from './recipe/comparable.js';
 import {HandleEndPoint, ParticleEndPoint, TagEndPoint} from './recipe/connection-constraint.js';
 import {Handle} from './recipe/handle.js';
@@ -35,16 +35,16 @@ import {Schema} from './schema.js';
 import {BigCollectionType, CollectionType, EntityType, InterfaceInfo, InterfaceType,
         ReferenceType, SlotType, Type, TypeVariable, SingletonType, TupleType} from './type.js';
 import {Dictionary} from './hot.js';
-import {ClaimIsTag} from './particle-claim.js';
-import {AbstractStore, StoreClaims} from './storageNG/abstract-store.js';
-import {Store} from './storageNG/store.js';
-import {StorageKey} from './storageNG/storage-key.js';
-import {Exists} from './storageNG/drivers/driver.js';
-import {StorageKeyParser} from './storageNG/storage-key-parser.js';
-import {VolatileMemoryProvider, VolatileStorageKey} from './storageNG/drivers/volatile.js';
-import {RamDiskStorageKey} from './storageNG/drivers/ramdisk.js';
+import {ClaimIsTag} from './manifest-types/claim.js';
+import {AbstractStore, StoreClaims} from './storage/abstract-store.js';
+import {Store} from './storage/store.js';
+import {StorageKey} from './storage/storage-key.js';
+import {Exists} from './storage/drivers/driver.js';
+import {StorageKeyParser} from './storage/storage-key-parser.js';
+import {VolatileMemoryProvider, VolatileStorageKey} from './storage/drivers/volatile.js';
+import {RamDiskStorageKey} from './storage/drivers/ramdisk.js';
 import {Refinement} from './refiner.js';
-import {ReferenceModeStorageKey} from './storageNG/reference-mode-storage-key.js';
+import {ReferenceModeStorageKey} from './storage/reference-mode-storage-key.js';
 import {LoaderBase} from '../platform/loader-base.js';
 import {Annotation, AnnotationRef} from './recipe/annotation.js';
 import {SchemaPrimitiveTypeValue} from './manifest-ast-nodes.js';
@@ -79,7 +79,7 @@ export class ManifestWarning extends ManifestError {
  */
 class ManifestVisitor {
   traverse(ast: AstNode.BaseNode) {
-    if (['string', 'number', 'boolean'].includes(typeof ast) || ast === null) {
+    if (['string', 'number', 'bigint', 'boolean'].includes(typeof ast) || ast === null) {
       return;
     }
     if (ast instanceof Array) {
@@ -190,10 +190,6 @@ export class Manifest {
   }
   get allRecipes() {
     return [...new Set(this._findAll(manifest => manifest._recipes))];
-  }
-  get allHandles() {
-    // TODO(#4820) Update `reduce` to use flatMap
-    return this.allRecipes.reduce((acc, x) => acc.concat(x.handles), []);
   }
   get activeRecipe() {
     return this._recipes.find(recipe => recipe.getAnnotation('active'));
@@ -375,9 +371,6 @@ export class Manifest {
     return [...this.allRecipes
       .reduce((acc, r) => acc.concat(r.handles), [])
       .filter(h => this.typesMatch(h, type, subtype) && hasAllTags(h) && matchesFate(h))];
-  }
-  findHandlesById(id: string): Handle[] {
-    return this.allHandles.filter(h => h.id === id);
   }
   findInterfaceByName(name: string) {
     return this._find(manifest => manifest._interfaces.find(iface => iface.name === name));
@@ -588,8 +581,8 @@ ${e.message}
       await processItems('interface', item => Manifest._processInterface(manifest, item));
       await processItems('particle', item => Manifest._processParticle(manifest, item, loader));
       await processItems('store', item => Manifest._processStore(manifest, item, loader, memoryProvider));
-      await processItems('recipe', item => Manifest._processRecipe(manifest, item));
       await processItems('policy', item => Manifest._processPolicy(manifest, item));
+      await processItems('recipe', item => Manifest._processRecipe(manifest, item));
     } catch (e) {
       dumpErrors(manifest);
       throw processError(e, false);
@@ -614,8 +607,25 @@ ${e.message}
         //     errors relating to failed merges can reference the manifest source.
         visitChildren();
 
+        this._checkStarFields(node);
         switch (node.kind) {
           case 'schema-inline': {
+            const starCount = node.fields.filter(f => f.name === '*').length;
+            // Warn user if there are multiple '*'s.
+            if (starCount > 1) {
+              const warning = new ManifestWarning(node.location, `Only one '*' is needed.`);
+              warning.key = 'multiStarFields';
+              manifest.errors.push(warning);
+            }
+            // Flag used to determine if type variables should resolve to max type
+            if (starCount > 0) {
+              node.allFields = true;
+              node.fields = node.fields.filter(f => f.name !== '*');
+              // Avoid creating an empty schema in response to `{*}`.
+              if (node.fields.length === 0) {
+                return;
+              }
+            }
             const schemas: Schema[] = [];
             const aliases: Schema[] = [];
             const names: string[] = [];
@@ -644,7 +654,7 @@ ${e.message}
                 } else {
                   // Validate that the specified or inferred type matches the schema.
                   const externalType = schema.fields[name];
-                  if (externalType && !Schema.typesEqual(externalType, type)) {
+                  if (externalType && !Schema.fieldTypeIsAtLeastAsSpecificAs(externalType, type)) {
                     throw new ManifestError(node.location, `Type of '${name}' does not match schema (${type} vs ${externalType})`);
                   }
                 }
@@ -669,7 +679,9 @@ ${e.message}
           }
           case 'variable-type': {
             const constraint = node.constraint && node.constraint.model;
-            node.model = TypeVariable.make(node.name, constraint, null);
+            // If true, type variable should resolve to max type (i.e. `~a with {*}` syntax support)
+            const toMaxType = node.constraint && node.constraint.kind === 'schema-inline' && !!node.constraint.allFields;
+            node.model = TypeVariable.make(node.name, constraint, null, toMaxType);
             return;
           }
           case 'slot-type': {
@@ -713,15 +725,22 @@ ${e.message}
             node.model = new SingletonType(node.type.model);
             return;
           case 'tuple-type':
-            if (node.types.some(t => t.kind !== 'reference-type')) {
-              throw new ManifestError(node.location, 'Only tuples of references are supported.');
-            }
+            node.types.forEach(this._checkStarFields);
             node.model = new TupleType(node.types.map(t => t.model));
             return;
           default:
             return;
         }
       }
+
+      // Asserts that '*' inline fields can only appear on type variable constraints.
+      private _checkStarFields(node) {
+        if (node.kind === 'variable-type') return;
+        if (node.type && node.type.kind === 'schema-inline' && node.type.allFields) {
+          throw new ManifestError(node.type.location, `Only type variables may have '*' fields.`);
+        }
+      }
+
     }();
     visitor.traverse(items);
   }
@@ -818,9 +837,18 @@ ${e.message}
       manifest.errors.push(warning);
     }
 
+    if (particleItem.implFile
+        && particleItem.implFile.startsWith('.')
+        && manifest.meta.namespace) {
+      const classpath = manifest.meta.namespace + particleItem.implFile;
+      if (Loader.isJvmClasspath(classpath)) {
+        particleItem.implFile = classpath;
+      }
+    }
+
     // TODO: loader should not be optional.
     if (particleItem.implFile && loader) {
-      if (!loader.isJvmClasspath(particleItem.implFile)) {
+      if (!Loader.isJvmClasspath(particleItem.implFile)) {
         particleItem.implFile = loader.join(manifest.fileName, particleItem.implFile);
       }
     }
@@ -843,10 +871,19 @@ ${e.message}
         }
         processArgTypes(arg.dependentConnections);
         arg.annotations = Manifest._buildAnnotationRefs(manifest, arg.annotations);
+
+        // TODO: Validate that the type of the expression matches the declared type.
+        // TODO: Transform the expression AST into a cross-platform text format.
+        arg.expression = arg.expression && arg.expression.kind;
       }
     };
+    if (particleItem.implFile && particleItem.args.some(arg => !!arg.expression)) {
+      const arg = particleItem.args.find(arg => !!arg.expression);
+      throw new ManifestError(arg.expression.location, `A particle with implementation cannot use result expressions.`);
+    }
     processArgTypes(particleItem.args);
     particleItem.annotations = Manifest._buildAnnotationRefs(manifest, particleItem.annotationRefs);
+    particleItem.manifestNamespace = manifest.meta.namespace;
     manifest._particles[particleItem.name] = new ParticleSpec(particleItem);
   }
 
@@ -1309,6 +1346,15 @@ ${e.message}
         const requireSection = recipe.newRequireSection();
         Manifest._buildRecipe(manifest, requireSection, item.items);
       }
+    }
+
+    const policyName = recipe.policyName;
+    if (policyName != null) {
+      const policy = manifest.allPolicies.find(p => p.name === policyName);
+      if (policy == null) {
+        throw new Error(`No policy named '${policyName}' was found in the manifest.`);
+      }
+      recipe.policy = policy;
     }
   }
 

@@ -20,7 +20,6 @@ import arcs.core.host.ParticleRegistration
 import arcs.core.host.SchedulerProvider
 import arcs.core.host.toRegistration
 import arcs.jvm.host.JvmSchedulerProvider
-import arcs.sdk.android.storage.ServiceStoreFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -46,8 +45,10 @@ class WriteAnimalHostService : ArcHostService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val arcId = intent?.getStringExtra(ARC_ID_EXTRA)
         val context = arcId?.let { arcHost.arcHostContext(it) }
-        val writeAnimalParticle=
-            context?.particles?.get("WriteAnimal")?.particle as? WriteAnimal
+        val writeAnimalParticle =
+            context?.particles?.first {
+                it.planParticle.particleName == "WriteAnimal"
+            }?.particle as? WriteAnimal
         writeAnimalParticle?.apply {
             scope.launch(handles.dispatcher) {
                 handles.animal.store(WriteAnimal_Animal("capybara"))
@@ -63,9 +64,14 @@ class WriteAnimalHostService : ArcHostService() {
         lifecycle: Lifecycle,
         schedulerProvider: SchedulerProvider,
         vararg initialParticles: ParticleRegistration
-    ) : AndroidHost(context, lifecycle, schedulerProvider, *initialParticles) {
-        override val activationFactory = ServiceStoreFactory(context, lifecycle)
-
+    ) : AndroidHost(
+        context = context,
+        lifecycle = lifecycle,
+        coroutineContext = Dispatchers.Default,
+        arcSerializationContext = Dispatchers.Default,
+        schedulerProvider = schedulerProvider,
+        particles = *initialParticles
+    ) {
         fun arcHostContext(arcId: String) = getArcHostContext(arcId)
     }
 

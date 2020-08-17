@@ -9,7 +9,7 @@ load(
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//java/arcs:allowed-packages"])
 
 arcs_kt_jvm_test_suite(
     name = "host",
@@ -34,9 +34,11 @@ arcs_kt_jvm_test_suite(
         "//java/arcs/core/storage/keys",
         "//java/arcs/core/storage/referencemode",
         "//java/arcs/core/testutil",
+        "//java/arcs/core/testutil/handles",
         "//java/arcs/core/util",
         "//java/arcs/core/util/testutil",
         "//java/arcs/jvm/host",
+        "//java/arcs/jvm/util",
         "//java/arcs/jvm/util/testutil",
         "//java/arcs/sdk",
         "//javatests/arcs/core/entity:lib",
@@ -57,6 +59,7 @@ arcs_kt_schema(
         "reflective.arcs",
         "test.arcs",
     ],
+    test_harness = True,
 )
 
 arcs_kt_plan(
@@ -123,7 +126,7 @@ arcs_kt_jvm_library(
     ],
     deps = [
         ":plans",
-        ":pure-particles-jvm",
+        ":pure-particles-jvm",  # buildcleaner: keep
         ":schemas",
         "//java/arcs/core/host",
         "//java/arcs/core/util",

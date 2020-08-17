@@ -27,20 +27,21 @@ import arcs.android.devtools.IDevToolsService
 import arcs.android.host.AndroidManifestHostRegistry
 import arcs.core.allocator.Allocator
 import arcs.core.common.ArcId
+import arcs.core.data.CollectionType
+import arcs.core.data.EntityType
 import arcs.core.data.HandleMode
-import arcs.core.entity.EntitySpec
-import arcs.core.entity.HandleContainerType
-import arcs.core.entity.HandleDataType
+import arcs.core.data.SingletonType
 import arcs.core.entity.HandleSpec
-import arcs.core.entity.HandleSpec.Companion.toType
 import arcs.core.entity.awaitReady
 import arcs.core.host.EntityHandleManager
+import arcs.core.storage.StoreManager
 import arcs.jvm.host.JvmSchedulerProvider
 import arcs.jvm.util.JvmTime
 import arcs.sdk.ReadWriteCollectionHandle
 import arcs.sdk.ReadWriteSingletonHandle
 import arcs.sdk.android.storage.ServiceStoreFactory
 import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -49,7 +50,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.EmptyCoroutineContext
 
 /** Entry UI to launch Arcs Test. */
 @ExperimentalCoroutinesApi
@@ -74,6 +74,10 @@ class TestActivity : AppCompatActivity() {
     private var resurrectionArcId: ArcId? = null
 
     private var devToolsService: IDevToolsService? = null
+
+    private val stores = StoreManager(
+        activationFactory = ServiceStoreFactory(context = this@TestActivity)
+    )
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
@@ -162,6 +166,9 @@ class TestActivity : AppCompatActivity() {
         )
         stopService(intent)
         scope.cancel()
+        runBlocking {
+            stores.reset()
+        }
         super.onDestroy()
     }
 
@@ -172,10 +179,8 @@ class TestActivity : AppCompatActivity() {
             EntityHandleManager(
                 time = JvmTime,
                 scheduler = schedulerProvider("readWriteArc"),
-                activationFactory = ServiceStoreFactory(
-                    context = this@TestActivity,
-                    lifecycle = this@TestActivity.lifecycle
-                )
+                stores = stores
+
             )
         )
         allocator?.startArcForPlan(PersonRecipePlan)
@@ -189,9 +194,8 @@ class TestActivity : AppCompatActivity() {
             EntityHandleManager(
                 time = JvmTime,
                 scheduler = schedulerProvider("resurrectionArc"),
-                activationFactory = ServiceStoreFactory(
-                    context = this@TestActivity,
-                    lifecycle = this@TestActivity.lifecycle
+                stores = StoreManager(
+                    activationFactory = ServiceStoreFactory(context = this@TestActivity)
                 )
             )
         )
@@ -226,9 +230,8 @@ class TestActivity : AppCompatActivity() {
             EntityHandleManager(
                 time = JvmTime,
                 scheduler = schedulerProvider("allocator"),
-                activationFactory = ServiceStoreFactory(
-                    context = this@TestActivity,
-                    lifecycle = this@TestActivity.lifecycle
+                stores = StoreManager(
+                    activationFactory = ServiceStoreFactory(context = this@TestActivity)
                 )
             )
         )
@@ -262,9 +265,8 @@ class TestActivity : AppCompatActivity() {
         val handleManager = EntityHandleManager(
             time = JvmTime,
             scheduler = schedulerProvider("handle"),
-            activationFactory = ServiceStoreFactory(
-                this,
-                lifecycle
+            stores = StoreManager(
+                activationFactory = ServiceStoreFactory(this)
             )
         )
         if (isCollection) {
@@ -273,12 +275,8 @@ class TestActivity : AppCompatActivity() {
                 HandleSpec(
                     "collectionHandle",
                     HandleMode.ReadWrite,
-                    toType(
-                        TestEntity.Companion,
-                        HandleDataType.Entity,
-                        HandleContainerType.Collection
-                    ),
-                    setOf<EntitySpec<*>>(TestEntity.Companion)
+                    CollectionType(EntityType(TestEntity.SCHEMA)),
+                    TestEntity
                 ),
                 when (storageMode) {
                     TestEntity.StorageMode.PERSISTENT -> TestEntity.collectionPersistentStorageKey
@@ -319,12 +317,8 @@ class TestActivity : AppCompatActivity() {
                 HandleSpec(
                     "singletonHandle",
                     HandleMode.ReadWrite,
-                    toType(
-                        TestEntity,
-                        HandleDataType.Entity,
-                        HandleContainerType.Singleton
-                    ),
-                    setOf<EntitySpec<*>>(TestEntity)
+                    SingletonType(EntityType(TestEntity.SCHEMA)),
+                    TestEntity
                 ),
                 when (storageMode) {
                     TestEntity.StorageMode.PERSISTENT -> TestEntity.singletonPersistentStorageKey

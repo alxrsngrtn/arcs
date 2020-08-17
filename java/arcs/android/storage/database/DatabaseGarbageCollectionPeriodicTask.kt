@@ -13,26 +13,27 @@ package arcs.android.storage.database
 import android.content.Context
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import arcs.core.storage.driver.DatabaseDriverProvider
 import arcs.core.util.TaggedLog
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
 /**
  * Implementation of a [Worker] which performs periodic scan of storage and deletes unused data.
  */
 class DatabaseGarbageCollectionPeriodicTask(
-    val appContext: Context,
+    appContext: Context,
     workerParams: WorkerParameters
 ) : Worker(appContext, workerParams) {
 
     private val log = TaggedLog { WORKER_TAG }
     init { log.debug { "Created." } }
 
-    override fun doWork(): Result = runBlocking(Dispatchers.IO) {
+    override fun doWork(): Result = runBlocking {
         log.debug { "Running." }
-        val databaseManager = AndroidSqliteDatabaseManager(appContext)
-        databaseManager.runGarbageCollection().join()
-        databaseManager.close()
+        // Use the DatabaseDriverProvider instance of the databaseManager to make sure changes by
+        // GC are propagated to listening Stores.
+        val databaseManager = DatabaseDriverProvider.manager
+        databaseManager.runGarbageCollection()
         log.debug { "Success." }
         // Indicate whether the task finished successfully with the Result
         Result.success()

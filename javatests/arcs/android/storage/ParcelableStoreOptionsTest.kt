@@ -14,9 +14,7 @@ package arcs.android.storage
 import android.os.Parcel
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import arcs.android.crdt.ParcelableCrdtType
-import arcs.core.crdt.CrdtCount
 import arcs.core.data.CountType
-import arcs.core.storage.StorageMode
 import arcs.core.storage.StoreOptions
 import arcs.core.storage.keys.RamDiskStorageKey
 import arcs.core.storage.referencemode.ReferenceModeStorageKey
@@ -29,12 +27,10 @@ import org.junit.runner.RunWith
 class ParcelableStoreOptionsTest {
     @Test
     fun parcelableRoundtrip_works() {
-        val storeOptions = StoreOptions<CrdtCount.Data, CrdtCount.Operation, Int>(
+        val storeOptions = StoreOptions(
             RamDiskStorageKey("test"),
             CountType(),
-            StorageMode.Direct,
-            versionToken = "Foo",
-            model = CrdtCount.Data()
+            versionToken = "Foo"
         )
 
         val marshalled = with(Parcel.obtain()) {
@@ -53,13 +49,12 @@ class ParcelableStoreOptionsTest {
 
     @Test
     fun parcelableRoundtrip_works_withAllowableNullDefaults() {
-        val storeOptions = StoreOptions<CrdtCount.Data, CrdtCount.Operation, Int>(
+        val storeOptions = StoreOptions(
             ReferenceModeStorageKey(
                 RamDiskStorageKey("backing"),
                 RamDiskStorageKey("collection")
             ),
-            CountType(),
-            StorageMode.ReferenceMode
+            CountType()
         )
 
         val marshalled = with(Parcel.obtain()) {

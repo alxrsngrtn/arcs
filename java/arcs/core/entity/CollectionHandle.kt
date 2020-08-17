@@ -14,26 +14,21 @@ import arcs.core.common.Referencable
 import arcs.core.crdt.CrdtSet
 import arcs.core.data.RawEntity
 import arcs.core.storage.StorageProxy
-import arcs.core.storage.StoreOptions
-import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.Job
 
-typealias CollectionData<T> = CrdtSet.Data<T>
-typealias CollectionOp<T> = CrdtSet.IOperation<T>
-typealias CollectionStoreOptions<T> = StoreOptions<CollectionData<T>, CollectionOp<T>, Set<T>>
 typealias CollectionProxy<T> = StorageProxy<CrdtSet.Data<T>, CrdtSet.IOperation<T>, Set<T>>
 
 /**
  * This class implements all of the methods that are needed by the various collection [Handle]
  * interfaces:
  * * [Handle]
- * * [ReadableHandle<T>]
- * * [ReadCollectionHandle<T>]
- * * [WriteCollectionHandle<T>]
- * * [ReadWriteCollectionHandle<T>]
- * * [QueryCollectionHandle<T>]
- * * [ReadQueryCollectionHandle<T>]
- * * [ReadWriteQueryCollectionHandle<T>]
+ * * [ReadableHandle]
+ * * [ReadCollectionHandle]
+ * * [WriteCollectionHandle]
+ * * [ReadWriteCollectionHandle]
+ * * [QueryCollectionHandle]
+ * * [ReadQueryCollectionHandle]
+ * * [ReadWriteQueryCollectionHandle]
  *
  * It manages the storage and retrieval of items of the specified [Entity] type, including
  * their conversion to and from the backing [RawEntity] type that the storage layer requires.
@@ -51,13 +46,18 @@ class CollectionHandle<T : Storable, R : Referencable>(
         check(spec.containerType == HandleContainerType.Collection)
     }
 
+    // Filter out expired models.
+    private fun fetchValidModels() = checkPreconditions {
+        storageProxy.getParticleViewUnsafe().filterNot {
+            storageAdapter.isExpired(it)
+        }
+    }
+
     // region implement ReadCollectionHandle<T>
 
-    // Use fetchAll to filter out expired items.
-    override fun size() = fetchAll().size
+    override fun size() = fetchValidModels().size
 
-    // Use fetchAll to filter out expired items.
-    override fun isEmpty() = fetchAll().isEmpty()
+    override fun isEmpty() = fetchValidModels().isEmpty()
 
     override fun fetchAll() = checkPreconditions {
         adaptValues(storageProxy.getParticleViewUnsafe())
@@ -88,35 +88,8 @@ class CollectionHandle<T : Storable, R : Referencable>(
         )
     }
 
-    // TODO(b/159257058): don't read the collection contents for write ops
     override fun clear(): Job = checkPreconditions {
-        val individualJobs = storageProxy.getParticleViewUnsafe().map {
-            storageProxy.applyOp(
-                CrdtSet.Operation.Remove(
-                    name,
-                    storageProxy.getVersionMap(),
-                    it
-                )
-            )
-        }
-
-        val masterJob = Job()
-        if (individualJobs.isEmpty()) {
-            masterJob.complete()
-        } else {
-            val jobsRemaining = atomic(individualJobs.size)
-            individualJobs.forEach {
-                it.invokeOnCompletion { error ->
-                    if (error != null) {
-                        masterJob.completeExceptionally(error)
-                    } else if (jobsRemaining.decrementAndGet() == 0) {
-                        masterJob.complete()
-                    }
-                }
-            }
-        }
-
-        masterJob
+        storageProxy.applyOp(CrdtSet.Operation.Clear(name, storageProxy.getVersionMap()))
     }
 
     override fun remove(element: T): Job = checkPreconditions {
@@ -131,8 +104,14 @@ class CollectionHandle<T : Storable, R : Referencable>(
     // endregion
 
     // region implement ReadableHandle<T>
-    override fun onUpdate(action: (Set<T>) -> Unit) =
-        storageProxy.addOnUpdate(callbackIdentifier) { action(adaptValues(it)) }
+    override fun onUpdate(action: (CollectionDelta<T>) -> Unit) =
+        storageProxy.addOnUpdate(callbackIdentifier) { oldValue, newValue ->
+            val oldIds = oldValue.mapTo(mutableSetOf()) { it.id }
+            val newIds = newValue.mapTo(mutableSetOf()) { it.id }
+            val added = newValue.filterTo(mutableSetOf()) { it.id !in oldIds }
+            val removed = oldValue.filterTo(mutableSetOf()) { it.id !in newIds }
+            action(CollectionDelta(adaptValues(added), adaptValues(removed)))
+        }
 
     override fun onDesync(action: () -> Unit) =
         storageProxy.addOnDesync(callbackIdentifier, action)
@@ -145,16 +124,20 @@ class CollectionHandle<T : Storable, R : Referencable>(
             "Entity must have an ID before it can be referenced."
         }
 
-        adaptValues(storageProxy.getParticleView()).let { data ->
-            data.firstOrNull()?.let {
-                require(it is Entity) {
-                    "Handle must contain Entity-typed elements in order to create references."
-                }
+        /**
+         * Check existence (do not use expensive [referencableToStorable]).
+         *
+         * As [CrdtSet.DataImpl.values] is in [MutableMap] type which uses [LinkedHashMap] in
+         * kotlin, [CrdtSet] model merging logic is the newest data gets inserted at the head
+         * which benefits the fifo traversal to expedites common use-cases i.e.
+         * store-then-createReference-immediately from time complexity O(N) to O(1).
+         */
+        requireNotNull(
+            storageProxy.getParticleViewUnsafe().firstOrNull {
+                !storageAdapter.isExpired(it) && it.id == entityId
             }
-            require(data.any { it is Entity && it.entityId == entityId }) {
-                "Entity is not stored in the Collection."
-            }
-        }
+        ) { "Entity is not stored in the Collection." }
+
         return createReferenceInternal(entity)
     }
     // endregion

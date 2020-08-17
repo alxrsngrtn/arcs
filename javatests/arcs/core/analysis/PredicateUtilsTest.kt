@@ -3,7 +3,6 @@ package arcs.core.analysis
 import arcs.core.data.InformationFlowLabel
 import arcs.core.data.InformationFlowLabel.Predicate
 import com.google.common.truth.Truth.assertThat
-import java.util.BitSet
 import kotlin.test.assertFailsWith
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,6 +16,7 @@ class PredicateUtilsTest {
         val asPredicate: Predicate.Label
             get() = Predicate.Label(InformationFlowLabel.SemanticTag(name))
     }
+
     private val labels = enumValues<Labels>().map { it.name }
     private val indicesMap: Map<InformationFlowLabel, Int> = enumValues<Labels>().map {
         it.asPredicate.label to it.ordinal
@@ -113,7 +113,7 @@ class PredicateUtilsTest {
             .containsExactly("A ^ C", "B ^ C")
 
         // (A \/ B) /\ (C \/ D)
-        val predicate_AorB_and_CorD =  Labels.A.asPredicate
+        val predicate_AorB_and_CorD = Labels.A.asPredicate
             .or(Labels.B.asPredicate)
             .and(Labels.C.asPredicate.or(Labels.D.asPredicate))
         assertThat(predicate_AorB_and_CorD.asStringList())
@@ -137,7 +137,7 @@ class PredicateUtilsTest {
             .containsExactly("A ^ !B", "C")
 
         // (A /\ B) \/ (C /\ D)
-        val predicate_AorB_and_CorD =  Labels.A.asPredicate
+        val predicate_AorB_and_CorD = Labels.A.asPredicate
             .and(Labels.B.asPredicate)
             .or(Labels.C.asPredicate.and(Labels.D.asPredicate))
         assertThat(predicate_AorB_and_CorD.asStringList())

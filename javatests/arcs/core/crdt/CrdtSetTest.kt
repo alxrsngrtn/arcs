@@ -63,8 +63,20 @@ class CrdtSetTest {
     @Test
     fun supportsAddingSameValueAgain_keepsNewValue() {
         val alice: CrdtSet<ReferenceWithValue> = CrdtSet()
-        alice.applyOperation(CrdtSet.Operation.Add("alice", VersionMap("alice" to 1), ReferenceWithValue("one", 1)))
-        alice.applyOperation(CrdtSet.Operation.Add("alice", VersionMap("alice" to 2), ReferenceWithValue("one", 2)))
+        alice.applyOperation(
+            CrdtSet.Operation.Add(
+                "alice",
+                VersionMap("alice" to 1),
+                ReferenceWithValue("one", 1)
+            )
+        )
+        alice.applyOperation(
+            CrdtSet.Operation.Add(
+                "alice",
+                VersionMap("alice" to 2),
+                ReferenceWithValue("one", 2)
+            )
+        )
 
         assertThat(alice.consumerView).containsExactly(ReferenceWithValue("one", 2))
     }
@@ -144,6 +156,68 @@ class CrdtSetTest {
                 Remove("charlie", VersionMap("alice" to 1), "two")
             )
         ).isFalse()
+    }
+
+    @Test
+    fun clear_matchingVersionMap() {
+        alice.add("alice", VersionMap("alice" to 1), "one")
+        alice.add("bob", VersionMap("bob" to 1), "two")
+        alice.add("bob", VersionMap("bob" to 2), "one")
+        alice.add("charlie", VersionMap("charlie" to 1), "three")
+
+        // Non-actor counts can be larger the store's clock, but the actor's count must match.
+        assertThat(alice.versionMap).isEqualTo(VersionMap("alice" to 1, "bob" to 2, "charlie" to 1))
+        assertThat(
+            alice.applyOperation(
+                Clear("charlie", VersionMap("alice" to 2, "bob" to 2, "charlie" to 1))
+            )
+        ).isTrue()
+        assertThat(alice.consumerView).isEmpty()
+    }
+
+    @Test
+    fun clear_laggingVersionMap() {
+        alice.add("alice", VersionMap("alice" to 1), "one")
+        alice.add("bob", VersionMap("bob" to 1), "two")
+        alice.add("bob", VersionMap("bob" to 2), "three")
+        alice.add("charlie", VersionMap("charlie" to 1), "four")
+
+        // Charlie's view of Bob's clock is behind Alice's, so one of Bob's entries isn't removed.
+        assertThat(alice.versionMap).isEqualTo(VersionMap("alice" to 1, "bob" to 2, "charlie" to 1))
+        assertThat(
+            alice.applyOperation(
+                Clear("charlie", VersionMap("alice" to 1, "bob" to 1, "charlie" to 1))
+            )
+        ).isTrue()
+        assertThat(alice.consumerView).containsExactly(Reference("three"))
+    }
+
+    @Test
+    fun clear_noVersionMap() {
+        alice.add("alice", VersionMap("alice" to 1), "one")
+        alice.add("bob", VersionMap("bob" to 1), "two")
+        alice.add("bob", VersionMap("bob" to 2), "one")
+        alice.add("charlie", VersionMap("charlie" to 1), "three")
+
+        assertThat(alice.applyOperation(Clear("charlie", VersionMap()))).isTrue()
+        assertThat(alice.consumerView).isEmpty()
+    }
+
+    @Test
+    fun clear_invalidVersionMap() {
+        alice.add("alice", VersionMap("alice" to 1), "one")
+        alice.add("charlie", VersionMap("charlie" to 1), "two")
+        alice.add("charlie", VersionMap("charlie" to 2), "three")
+
+        // Charlie's count must match for any items to be removed.
+        assertThat(alice.versionMap).isEqualTo(VersionMap("alice" to 1, "charlie" to 2))
+        assertThat(
+            alice.applyOperation(
+                Clear("charlie", VersionMap("alice" to 1, "charlie" to 1))
+            )
+        ).isFalse()
+        assertThat(alice.consumerView)
+            .containsExactly(Reference("one"), Reference("two"), Reference("three"))
     }
 
     @Test
@@ -561,6 +635,16 @@ class CrdtSetTest {
     }
 
     @Test
+    fun returnsEmptyOtherChange_whenMergingIntoEmptyModel() {
+        // Alice is empty, Bob has an item.
+        bob.add("a", VersionMap("a" to 1), "foo")
+
+        val (modelChange, otherChange) = alice.merge(bob.data)
+        assertThat(modelChange.isEmpty()).isFalse()
+        assertThat(otherChange.isEmpty()).isTrue()
+    }
+
+    @Test
     fun merge_handlesRawEntityChange() {
         val new = CrdtSet(
             CrdtSet.DataImpl(
@@ -640,7 +724,10 @@ class CrdtSetTest {
     }
 
     private data class Reference(override val id: ReferenceId) : Referencable
-    private data class ReferenceWithValue(override val id: ReferenceId, val value: Int) : Referencable
+    private data class ReferenceWithValue(
+        override val id: ReferenceId,
+        val value: Int
+    ) : Referencable
 
     /** Pseudo-constructor for [CrdtSet.Operation.Add]. */
     private fun Add(actor: Actor, versions: VersionMap, id: ReferenceId) =
@@ -649,6 +736,10 @@ class CrdtSetTest {
     /** Pseudo-constructor for [CrdtSet.Operation.Remove]. */
     private fun Remove(actor: Actor, versions: VersionMap, id: ReferenceId) =
         CrdtSet.Operation.Remove(actor, versions, Reference(id))
+
+    /** Pseudo-constructor for [CrdtSet.Operation.Remove]. */
+    private fun Clear(actor: Actor, versions: VersionMap) =
+        CrdtSet.Operation.Clear<Reference>(actor, versions)
 
     private fun CrdtSet<Reference>.add(
         actor: Actor,

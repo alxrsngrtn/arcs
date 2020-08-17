@@ -11,15 +11,17 @@
 package arcs.android.sdk.host
 
 import android.content.Context
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleObserver
-import androidx.lifecycle.OnLifecycleEvent
+import androidx.lifecycle.LifecycleOwner
+import arcs.core.host.AbstractArcHost
 import arcs.core.host.ArcHost
 import arcs.core.host.ParticleRegistration
 import arcs.core.host.SchedulerProvider
+import arcs.core.storage.ActivationFactory
 import arcs.core.storage.StoreManager
-import arcs.jvm.host.JvmHost
-import arcs.sdk.android.storage.ServiceStoreFactory
+import arcs.jvm.util.JvmTime
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 
@@ -29,27 +31,36 @@ import kotlinx.coroutines.runBlocking
 @ExperimentalCoroutinesApi
 abstract class AndroidHost(
     val context: Context,
-    val lifecycle: Lifecycle,
+    lifecycle: Lifecycle,
+    coroutineContext: CoroutineContext,
+    arcSerializationContext: CoroutineContext,
     schedulerProvider: SchedulerProvider,
+    activationFactory: ActivationFactory? = null,
     vararg particles: ParticleRegistration
-) : JvmHost(schedulerProvider, *particles), LifecycleObserver {
-
+) : AbstractArcHost(
+    coroutineContext = coroutineContext,
+    updateArcHostContextCoroutineContext = arcSerializationContext,
+    schedulerProvider = schedulerProvider,
+    initialParticles = *particles
+), DefaultLifecycleObserver {
     init {
         lifecycle.addObserver(this)
     }
 
-    override val activationFactory = ServiceStoreFactory(context, lifecycle)
+    override val platformTime = JvmTime
 
-    /*
-     * Android uses [StorageService] which is a persistent process, so we don't share
-     * [ActiveStore] between [EntityHandleManager]s, but use a new [StoreManager] for each
-     * new arc. Otherwise, when closing an [ActiveStore] when one Arc is shutdown leads to the
-     * handles being unusable in other arcs that are still active.
-     */
-    override val stores: StoreManager get() = StoreManager()
+    @ExperimentalCoroutinesApi
+    override val stores: StoreManager = StoreManager(activationFactory)
 
-    @OnLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-    fun onLifecycleDestroyed() = runBlocking {
+    override fun onDestroy(owner: LifecycleOwner) {
+        super.onDestroy(owner)
+        runBlocking {
             shutdown()
+        }
+    }
+
+    override suspend fun shutdown() {
+        super.shutdown()
+        stores.reset()
     }
 }

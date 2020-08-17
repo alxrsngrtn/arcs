@@ -20,12 +20,8 @@ import arcs.core.storage.ProxyMessage.SyncRequest
 import arcs.core.type.Type
 import arcs.core.util.LruCacheMap
 import arcs.core.util.TaggedLog
-import kotlin.coroutines.coroutineContext
-import kotlinx.coroutines.joinAll
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
 /**
  * An collection of [DirectStore]s that allows multiple CRDT models to be stored as sub-keys
@@ -36,7 +32,8 @@ import kotlinx.coroutines.withContext
 class DirectStoreMuxer<Data : CrdtData, Op : CrdtOperation, T>(
     val storageKey: StorageKey,
     val backingType: Type,
-    val callbackFactory: (String) -> ProxyCallback<Data, Op, T>
+    val callbackFactory: (String) -> ProxyCallback<Data, Op, T>,
+    private val options: StoreOptions? = null
 ) {
     private val storeMutex = Mutex()
     private val log = TaggedLog { "DirectStoreMuxer" }
@@ -52,11 +49,12 @@ class DirectStoreMuxer<Data : CrdtData, Op : CrdtOperation, T>(
         if (!storeRecord.store.closed) {
             log.debug { "close the store(${storeRecord.id})" }
 
-            // The store will be actually closed as soon as there are no connected proxies.
             try {
-                storeRecord.store.off(storeRecord.id)
+                storeRecord.store.close()
             } catch (e: Exception) {
-                log.warning { "failed to close the store(${storeRecord.id})" }
+                // TODO(b/160251910): Make logging detail more cleanly conditional.
+                log.debug(e) { "failed to close the store(${storeRecord.id})" }
+                log.info { "failed to close the store" }
             }
         }
     }
@@ -74,11 +72,14 @@ class DirectStoreMuxer<Data : CrdtData, Op : CrdtOperation, T>(
 
     /** Calls [idle] on all existing contained stores and waits for their completion. */
     suspend fun idle() = storeMutex.withLock {
-        stores.values.map {
-            withContext(coroutineContext) {
-                launch { it.store.idle() }
-            }
-        }.joinAll()
+        stores.values.toList()
+    }.map {
+        /**
+         * If the overhead/wall-time of [DirectStore.idle] is longer than an
+         * [CoroutineScope.launch] i.e. more than 5ms debounce time, launching
+         * [DirectStore.idle]s in parallel can further help performance,
+         */
+        it.store.idle()
     }
 
     /**
@@ -102,10 +103,11 @@ class DirectStoreMuxer<Data : CrdtData, Op : CrdtOperation, T>(
     }
 
     /* internal */ suspend fun setupStore(referenceId: String): StoreRecord<Data, Op, T> {
-        val store = DirectStore.create(
-            StoreOptions<Data, Op, T>(
+        val store = DirectStore.create<Data, Op, T>(
+            StoreOptions(
                 storageKey = storageKey.childKeyWithComponent(referenceId),
-                type = backingType
+                type = backingType,
+                coroutineScope = options?.coroutineScope
             )
         )
 

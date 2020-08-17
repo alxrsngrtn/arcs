@@ -17,7 +17,6 @@ import arcs.android.storage.service.IResultCallback
 import arcs.android.storage.service.IStorageService
 import arcs.android.storage.service.IStorageServiceCallback
 import arcs.android.storage.toParcelable
-import arcs.core.crdt.CrdtCount
 import arcs.core.data.CountType
 import arcs.core.storage.StoreOptions
 import arcs.core.storage.keys.RamDiskStorageKey
@@ -140,7 +139,7 @@ class StorageServiceConnectionTest {
     }
 
     companion object {
-        private val OPTIONS = StoreOptions<CrdtCount.Data, CrdtCount.Operation, Int>(
+        private val OPTIONS = StoreOptions(
             RamDiskStorageKey("myData"),
             CountType()
         ).toParcelable(ParcelableCrdtType.Count)

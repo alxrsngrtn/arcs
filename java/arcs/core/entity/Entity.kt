@@ -13,9 +13,9 @@ package arcs.core.entity
 
 import arcs.core.common.Id
 import arcs.core.common.Referencable
+import arcs.core.data.Capability.Ttl
 import arcs.core.data.RawEntity
 import arcs.core.data.Schema
-import arcs.core.data.Ttl
 import arcs.core.data.util.ReferencablePrimitive
 import arcs.core.util.Time
 import kotlin.IllegalArgumentException
@@ -39,10 +39,15 @@ interface Entity : Storable {
         idGenerator: Id.Generator,
         handleName: String,
         time: Time,
-        ttl: Ttl = Ttl.Infinite
+        ttl: Ttl = Ttl.Infinite()
     )
 
-    fun serialize(): RawEntity
+    /**
+     * Takes a concrete entity class [T] and convert it to [RawEntity].
+     * @param storeSchema an optional [Schema] restricting entity serialization only to fields
+     * allowed by the policies.
+     */
+    fun serialize(storeSchema: Schema? = null): RawEntity
 
     /** Resets all fields to the default value. */
     fun reset()

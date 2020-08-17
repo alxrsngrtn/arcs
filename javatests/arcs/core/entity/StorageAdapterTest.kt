@@ -2,20 +2,19 @@ package arcs.core.entity
 
 import arcs.core.common.Id
 import arcs.core.crdt.VersionMap
+import arcs.core.data.Capability.Ttl
 import arcs.core.data.RawEntity.Companion.NO_REFERENCE_ID
-import arcs.core.data.Ttl
+import arcs.core.data.SchemaRegistry
 import arcs.core.data.util.toReferencable
+import arcs.core.storage.DefaultActivationFactory
 import arcs.core.storage.Reference as StorageReference
 import arcs.core.storage.StorageKey
-import arcs.core.storage.StoreManager
 import arcs.core.storage.keys.DatabaseStorageKey
 import arcs.core.storage.keys.RamDiskStorageKey
 import arcs.core.storage.referencemode.ReferenceModeStorageKey
 import arcs.core.storage.testutil.DummyStorageKey
-import arcs.core.util.Scheduler
 import arcs.jvm.util.testutil.FakeTime
 import com.google.common.truth.Truth.assertThat
-import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.assertFailsWith
 import org.junit.Before
 import org.junit.Test
@@ -24,15 +23,15 @@ import org.junit.runners.JUnit4
 
 @RunWith(JUnit4::class)
 class StorageAdapterTest {
-
     private val time = FakeTime()
-    private val dereferencerFactory = EntityDereferencerFactory()
+    private val dereferencerFactory = EntityDereferencerFactory(DefaultActivationFactory)
     private val idGenerator = Id.Generator.newForTest("session")
     private val storageKey = DummyStorageKey("entities")
 
     @Before
     fun setUp() {
         SchemaRegistry.register(DummyEntity.SCHEMA)
+        SchemaRegistry.register(InlineDummyEntity.SCHEMA)
     }
 
     @Test
@@ -59,6 +58,40 @@ class StorageAdapterTest {
         assertThat(entity.serialize()).isEqualTo(rawEntity)
 
         // Convert back from storage format again.
+        assertThat(adapter.referencableToStorable(rawEntity)).isEqualTo(entity)
+    }
+
+    @Test
+    fun entityStorageAdapterRestricted() {
+        val adapter = EntityStorageAdapter(
+            "name",
+            idGenerator,
+            DummyEntity,
+            Ttl.Minutes(1),
+            time,
+            dereferencerFactory,
+            storageKey,
+            RestrictedDummyEntity.SCHEMA
+        )
+        var entity = DummyEntity().apply {
+            text = "Watson"
+            num = 42.0
+            bool = true
+        }
+
+        // Convert to storage format (RawEntity).
+        val rawEntity = adapter.storableToReferencable(entity)
+
+        assertThat(entity.entityId).isNotNull()
+        assertThat(rawEntity.id).isNotEqualTo(NO_REFERENCE_ID)
+        assertThat(rawEntity.creationTimestamp).isEqualTo(time.currentTimeMillis)
+        assertThat(rawEntity.expirationTimestamp).isEqualTo(time.currentTimeMillis + 60000)
+        assertThat(rawEntity.singletons.size).isEqualTo(1)
+        assertThat(rawEntity.singletons).containsEntry("text", "Watson".toReferencable())
+        assertThat(entity.serialize(RestrictedDummyEntity.SCHEMA)).isEqualTo(rawEntity)
+
+        // Convert back from storage format again.
+        entity = entity.apply { num = null }.apply { bool = null }
         assertThat(adapter.referencableToStorable(rawEntity)).isEqualTo(entity)
     }
 
@@ -153,13 +186,19 @@ class StorageAdapterTest {
         refAdapterWithKey(dummyKey).storableToReferencable(referenceWithKey(ramdiskKey))
 
         // Storing in ramdisk a reference to the db.
-        assertFails { refAdapterWithKey(ramdiskKey).storableToReferencable(referenceWithKey(dbKey)) }
+        assertFails {
+            refAdapterWithKey(ramdiskKey).storableToReferencable(referenceWithKey(dbKey))
+        }
 
         // Storing in dummy a reference to the db.
         assertFails { refAdapterWithKey(dummyKey).storableToReferencable(referenceWithKey(dbKey)) }
 
         // Storing the reference in a different db.
-        val dbKey2 = DatabaseStorageKey.Persistent("db", DummyEntity.SCHEMA_HASH, dbName = "different")
+        val dbKey2 = DatabaseStorageKey.Persistent(
+            "db",
+            DummyEntity.SCHEMA_HASH,
+            dbName = "different"
+        )
         assertFails { refAdapterWithKey(dbKey2).storableToReferencable(referenceWithKey(dbKey)) }
 
         // Illegal reference (points to refmode key).
@@ -187,15 +226,27 @@ class StorageAdapterTest {
         entityStorageAdapterWithKey(dbRefMode).storableToReferencable(entityWithKey(dbKey))
 
         // Storing in ramdisk a reference to the db.
-        assertFails { entityStorageAdapterWithKey(ramdiskKey).storableToReferencable(entityWithKey(dbKey)) }
-        assertFails { entityStorageAdapterWithKey(ramdiskRefMode).storableToReferencable(entityWithKey(dbKey)) }
+        assertFails {
+            entityStorageAdapterWithKey(ramdiskKey).storableToReferencable(entityWithKey(dbKey))
+        }
+        assertFails {
+            entityStorageAdapterWithKey(ramdiskRefMode).storableToReferencable(entityWithKey(dbKey))
+        }
 
         // Storing in dummy a reference to the db.
-        assertFails { entityStorageAdapterWithKey(dummyKey).storableToReferencable(entityWithKey(dbKey)) }
+        assertFails {
+            entityStorageAdapterWithKey(dummyKey).storableToReferencable(entityWithKey(dbKey))
+        }
 
         // Storing the reference in a different db.
-        val dbKey2 = DatabaseStorageKey.Persistent("db", DummyEntity.SCHEMA_HASH, dbName = "different")
-        assertFails { entityStorageAdapterWithKey(dbKey2).storableToReferencable(entityWithKey(dbKey)) }
+        val dbKey2 = DatabaseStorageKey.Persistent(
+            "db",
+            DummyEntity.SCHEMA_HASH,
+            dbName = "different"
+        )
+        assertFails {
+            entityStorageAdapterWithKey(dbKey2).storableToReferencable(entityWithKey(dbKey))
+        }
 
         // Illegal reference (points to refmode key).
         assertFailsWith<IllegalStateException> {
@@ -204,7 +255,9 @@ class StorageAdapterTest {
 
         // Invalid refmode key, the container and backing store are in different dbs.
         val invalidKey = ReferenceModeStorageKey(dbKey2, dbKey)
-        assertFails { entityStorageAdapterWithKey(invalidKey).storableToReferencable(entityWithKey(dbKey)) }
+        assertFails {
+            entityStorageAdapterWithKey(invalidKey).storableToReferencable(entityWithKey(dbKey))
+        }
     }
 
     private fun refAdapterWithKey(key: StorageKey) =

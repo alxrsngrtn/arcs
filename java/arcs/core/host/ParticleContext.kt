@@ -56,6 +56,10 @@ class ParticleContext(
 
     private val dispatcher = scheduler?.asCoroutineDispatcher()
 
+    override fun toString() = "ParticleContext(particle=$particle, particleState=$particleState, " +
+            "consecutiveFailureCount=$consecutiveFailureCount, isWriteOnly=$isWriteOnly, " +
+            "awaitingReady=$awaitingReady, desyncedHandles=$desyncedHandles)"
+
     /** Create a copy of [ParticleContext] with a new [particle]. */
     fun copyWith(newParticle: Particle) = ParticleContext(
         newParticle,
@@ -95,10 +99,10 @@ class ParticleContext(
     suspend fun initParticle() {
         withContext(requireNotNull(dispatcher)) {
             check(
-                particleState == ParticleState.Instantiated ||
-                particleState == ParticleState.Stopped ||
-                particleState == ParticleState.Failed ||
-                particleState == ParticleState.Failed_NeverStarted
+                particleState in arrayOf(
+                    ParticleState.Instantiated, ParticleState.Stopped,
+                    ParticleState.Failed, ParticleState.Failed_NeverStarted
+                )
             ) {
                 "${planParticle.particleName}: initParticle can only be called for newly " +
                         "created or restarted particles"
@@ -130,12 +134,26 @@ class ParticleContext(
      */
     suspend fun runParticle(notifyReady: (Particle) -> Unit) {
         withContext(requireNotNull(dispatcher)) {
-            check(particleState == ParticleState.Waiting) {
-                "${planParticle.particleName}: runParticle can only be called after " +
-                        "a successful call to initParticle"
+            when (particleState) {
+                ParticleState.Running -> {
+                    // If multiple particles read from the same StorageProxy, it is possible that
+                    // the proxy syncs and notifies READY before all the calls to runParticle are
+                    // invoked. In this case, the remaining particles may already be running.
+                    check(awaitingReady.isEmpty()) {
+                        "${planParticle.particleName}: runParticle called on an already running " +
+                                "particle; awaitingReady should be empty but still has " +
+                                "${awaitingReady.size} handles"
+                    }
+                    notifyReady(particle)
+                    return@withContext
+                }
+                ParticleState.Waiting -> Unit
+                else -> throw IllegalStateException("${planParticle.particleName}: runParticle " +
+                        "should not be called on a particle in state $particleState")
             }
 
             this@ParticleContext.notifyReady = notifyReady
+
             if (isWriteOnly) {
                 // Particles with only write-only handles won't receive any storage
                 // events and thus need to have onReady invoked directly.
@@ -181,9 +199,9 @@ class ParticleContext(
      */
     fun notify(event: StorageEvent, handle: Handle) {
         check(
-            particleState == ParticleState.Waiting ||
-            particleState == ParticleState.Running ||
-            particleState == ParticleState.Desynced
+            particleState in arrayOf(
+                ParticleState.Waiting, ParticleState.Running, ParticleState.Desynced
+            )
         ) {
             "${planParticle.particleName}: storage events should not be received " +
                     "in state $particleState"
@@ -225,18 +243,17 @@ class ParticleContext(
     }
 
     private fun markParticleAsFailed(error: Exception, eventName: String): Exception {
-        log.error(error) { "Failure in particle ${planParticle.particleName}.$eventName()" }
+        // TODO(b/160251910): Make logging detail more cleanly conditional.
+        log.debug(error) { "Failure in particle ${planParticle.particleName}.$eventName()" }
+        log.info { "Failure in particle." }
 
         if (particleState != ParticleState.MaxFailed) {
-            particleState = if (particleState.hasBeenStarted) {
-                ParticleState.Failed
-            } else {
-                ParticleState.Failed_NeverStarted
-            }
-
             consecutiveFailureCount++
-            if (consecutiveFailureCount > MAX_CONSECUTIVE_FAILURES) {
-                particleState = ParticleState.MaxFailed
+            particleState = when {
+                consecutiveFailureCount > MAX_CONSECUTIVE_FAILURES ->
+                    ParticleState.maxFailedWith(error)
+                particleState.hasBeenStarted -> ParticleState.failedWith(error)
+                else -> ParticleState.failedNeverStartedWith(error)
             }
         }
         return error

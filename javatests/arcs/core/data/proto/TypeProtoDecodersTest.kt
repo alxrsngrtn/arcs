@@ -1,10 +1,23 @@
 package arcs.core.data.proto
 
-import arcs.core.data.*
-import arcs.core.testutil.fail
+import arcs.core.data.CollectionType
+import arcs.core.data.CountType
+import arcs.core.data.EntityType
+import arcs.core.data.FieldType
+import arcs.core.data.ReferenceType
+import arcs.core.data.Schema
+import arcs.core.data.SchemaFields
+import arcs.core.data.SchemaName
+import arcs.core.data.SchemaRegistry
+import arcs.core.data.SingletonType
+import arcs.core.data.TupleType
+import arcs.core.data.TypeVariable
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import com.google.protobuf.TextFormat
 import kotlin.test.assertFailsWith
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
@@ -18,265 +31,208 @@ fun parseTypeProtoText(protoText: String): TypeProto {
 
 @RunWith(JUnit4::class)
 class TypeProtoDecodersTest {
-    @Test
-    fun decodesPrimitiveTypes() {
-        assertThat(PrimitiveTypeProto.TEXT.decode()).isEqualTo(PrimitiveType.Text)
-        assertThat(PrimitiveTypeProto.BOOLEAN.decode()).isEqualTo(PrimitiveType.Boolean)
-        assertThat(PrimitiveTypeProto.NUMBER.decode()).isEqualTo(PrimitiveType.Number)
-        assertFailsWith<IllegalArgumentException> {
-            PrimitiveTypeProto.UNRECOGNIZED.decode()
-        }
+    @Before
+    fun setUp() {
+        SchemaRegistry.register(DUMMY_ENTITY_TYPE.entitySchema)
+    }
+
+    @After
+    fun tearDown() {
+        SchemaRegistry.clearForTest()
     }
 
     @Test
-    fun decodesPrimitiveTypeAsFieldType() {
-        val textField = PrimitiveTypeProto.TEXT.decodeAsFieldType()
-        assertThat(textField.primitiveType).isEqualTo(PrimitiveType.Text)
-        val numberField = PrimitiveTypeProto.NUMBER.decodeAsFieldType()
-        assertThat(numberField.primitiveType).isEqualTo(PrimitiveType.Number)
-        val booleanField = PrimitiveTypeProto.BOOLEAN.decodeAsFieldType()
-        assertThat(booleanField.primitiveType).isEqualTo(PrimitiveType.Boolean)
+    fun roundTrip_primitiveFieldType() {
+        assertThat(FieldType.Text.encode().decodeAsFieldType()).isEqualTo(FieldType.Text)
+        assertThat(FieldType.Boolean.encode().decodeAsFieldType()).isEqualTo(FieldType.Boolean)
+        assertThat(FieldType.Number.encode().decodeAsFieldType()).isEqualTo(FieldType.Number)
+        assertThat(FieldType.Byte.encode().decodeAsFieldType()).isEqualTo(FieldType.Byte)
+        assertThat(FieldType.Short.encode().decodeAsFieldType()).isEqualTo(FieldType.Short)
+        assertThat(FieldType.Int.encode().decodeAsFieldType()).isEqualTo(FieldType.Int)
+        assertThat(FieldType.Long.encode().decodeAsFieldType()).isEqualTo(FieldType.Long)
+        assertThat(FieldType.Char.encode().decodeAsFieldType()).isEqualTo(FieldType.Char)
+        assertThat(FieldType.Float.encode().decodeAsFieldType()).isEqualTo(FieldType.Float)
+        assertThat(FieldType.Double.encode().decodeAsFieldType()).isEqualTo(FieldType.Double)
+
+        val e = assertFailsWith<IllegalArgumentException> { FieldType.Text.encode().decode() }
+        assertThat(e).hasMessageThat().isEqualTo("Cannot decode FieldType PRIMITIVE to Type.")
     }
 
     @Test
-    fun decodesTypeProtoAsFieldType() {
-        fun checkPrimitive(textProto: String, expected: PrimitiveType) {
-            val primitiveTypeProto = parseTypeProtoText(textProto)
-            val field = primitiveTypeProto.decodeAsFieldType()
-            when (field) {
-                is FieldType.Primitive ->
-                    assertThat(field.primitiveType).isEqualTo(expected)
-                else -> fail("TypeProto should have been decoded to [FieldType.Primitive].")
-            }
-        }
-        checkPrimitive("primitive: TEXT", PrimitiveType.Text)
-        checkPrimitive("primitive: BOOLEAN", PrimitiveType.Boolean)
-        checkPrimitive("primitive: NUMBER", PrimitiveType.Number)
-        assertFailsWith<IllegalArgumentException> {
-            checkPrimitive("""variable: { name: "Blah"}""", PrimitiveType.Text)
-        }
+    fun roundTrip_listFieldType() {
+        val type = FieldType.ListOf(FieldType.Text)
+        assertThat(type.encode().decodeAsFieldType()).isEqualTo(type)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decode() }
+        assertThat(e).hasMessageThat().isEqualTo("Cannot decode FieldType LIST to Type.")
     }
 
     @Test
-    fun decodesEntityTypeProtoAsEntityType() {
-        val entityTypeProto = """
-        entity {
-          schema {
-            names: "Person"
-            fields: {
-              key: "name"
-              value: { primitive: TEXT }
-            }
-          }
-        }
-        """.trimIndent()
-        val entityType = parseTypeProtoText(entityTypeProto).decode()
-        val expectedSchema = Schema(
-            names = setOf(SchemaName("Person")),
-            fields = SchemaFields(singletons=mapOf("name" to FieldType.Text), collections=mapOf()),
-            hash = ""
-        )
-        when (entityType) {
-            is EntityType -> assertThat(entityType.entitySchema).isEqualTo(expectedSchema)
-            else -> fail("TypeProto should have been decoded to [EntityType].")
-        }
-    }
-
-    @Test
-    fun decodesSingletonTypeProtoAsSingletonType() {
-        val singletonTypeProto = """
-        singleton {
-          singleton_type {
-            entity {
-              schema {
-                names: "Foo"
-                fields: {
-                  key: "value"
-                  value: { primitive: TEXT }
-                }
-              }
-            }
-          }
-        }
-        """.trimIndent()
-        val singletonType = parseTypeProtoText(singletonTypeProto).decode()
-        val expectedSchema = Schema(
-            names = setOf(SchemaName("Foo")),
-            fields = SchemaFields(singletons=mapOf("value" to FieldType.Text), collections=mapOf()),
-            hash = ""
-        )
-        when (singletonType) {
-            is SingletonType<*> -> assertThat(singletonType.containedType).isEqualTo(
-                EntityType(expectedSchema))
-            else -> fail("TypeProto should have been decoded to [SingletonType].")
-        }
-    }
-
-    @Test
-    fun decodesCollectionTypeProtoAsCollectionType() {
-        val collectionTypeProto = """
-        collection {
-          collection_type {
-            entity {
-              schema {
-                names: "Person"
-                fields: {
-                  key: "name"
-                  value: { primitive: TEXT }
-                }
-              }
-            }
-          }
-        }
-        """.trimIndent()
-        val collectionType = parseTypeProtoText(collectionTypeProto).decode()
-        val expectedSchema = Schema(
-            names = setOf(SchemaName("Person")),
-            fields = SchemaFields(singletons=mapOf("name" to FieldType.Text), collections=mapOf()),
-            hash = ""
-        )
-        when (collectionType) {
-            is CollectionType<*> -> assertThat(collectionType.collectionType).isEqualTo(
-                EntityType(expectedSchema)
+    fun roundTrip_entityType() {
+        // schema Person {name: Text, luckyNumbers: [Number]}
+        val type = EntityType(
+            Schema(
+                names = setOf(SchemaName("Person")),
+                fields = SchemaFields(
+                    singletons = mapOf("name" to FieldType.Text),
+                    collections = mapOf("luckyNumbers" to FieldType.Number)
+                ),
+                hash = "abc"
             )
-            else -> fail("TypeProto should have been decoded to [CollectionType].")
-        }
-    }
-
-    @Test
-    fun decodesReferenceTypeProtoAsReferenceType() {
-        val referenceTypeProto = """
-        reference {
-          referred_type {
-            entity {
-              schema {
-                names: "Person"
-                fields: {
-                  key: "name"
-                  value: { primitive: TEXT }
-                }
-              }
-            }
-          }
-        }
-        """.trimIndent()
-        val referenceType = parseTypeProtoText(referenceTypeProto).decode()
-        val expectedSchema = Schema(
-            names = setOf(SchemaName("Person")),
-            fields = SchemaFields(singletons=mapOf("name" to FieldType.Text), collections=mapOf()),
-            hash = ""
         )
-        when (referenceType) {
-            is ReferenceType<*> -> assertThat(referenceType.containedType).isEqualTo(
-                EntityType(expectedSchema)
-            )
-            else -> fail("TypeProto should have been decoded to [ReferenceType].")
-        }
-    }
+        assertThat(type.encode().decode()).isEqualTo(type)
+        assertWithMessage("Schema should have been registered!")
+            .that(SchemaRegistry.getSchema(type.entitySchema.hash))
+            .isEqualTo(type.entitySchema)
 
-    @Test
-    fun decodesCountTypeProtoAsCountType() {
-        val countTypeProto = "count {}"
-        val countType = parseTypeProtoText(countTypeProto).decode()
-        assertThat(countType).isInstanceOf(CountType::class.java)
-    }
-
-    @Test
-    fun decodesTupleTypeProtoAsReferenceType() {
-        val tupleTypeProto = """
-        tuple {
-          elements {
-            entity {
-              schema {
-                names: "Person"
-                fields: {
-                  key: "name"
-                  value: { primitive: TEXT }
-                }
-              }
-            }
-          }
-          elements {
-            entity {
-              schema {
-                names: "Age"
-                fields: {
-                  key: "value"
-                  value: { primitive: NUMBER }
-                }
-              }
-            }
-          }
-        }
-        """.trimIndent()
-        val tupleType = parseTypeProtoText(tupleTypeProto).decode()
-        val personSchema = Schema(
-            names = setOf(SchemaName("Person")),
-            fields = SchemaFields(singletons=mapOf("name" to FieldType.Text), collections=mapOf()),
-            hash = ""
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decodeAsFieldType() }
+        assertThat(e).hasMessageThat().isEqualTo(
+            "Cannot decode non-inline entities to FieldType.InlineEntity"
         )
-        val ageSchema = Schema(
-            names = setOf(SchemaName("Age")),
-            fields = SchemaFields(
-                singletons=mapOf("value" to FieldType.Number),
-                collections=mapOf()
+    }
+
+    @Test
+    fun roundTrip_inlineEntityFieldType() {
+        val type = FieldType.InlineEntity(DUMMY_ENTITY_HASH)
+        assertThat(type.encode().decodeAsFieldType()).isEqualTo(type)
+        assertWithMessage("Schema should have been registered!")
+            .that(SchemaRegistry.getSchema(DUMMY_ENTITY_HASH))
+            .isEqualTo(DUMMY_ENTITY_TYPE.entitySchema)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decode() }
+        assertThat(e).hasMessageThat().isEqualTo("Cannot decode inline entities to EntityType.")
+    }
+
+    @Test
+    fun roundTrip_singletonType() {
+        val type = SingletonType(DUMMY_ENTITY_TYPE)
+        assertThat(type.encode().decode()).isEqualTo(type)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decodeAsFieldType() }
+        assertThat(e).hasMessageThat().isEqualTo(
+            "Cannot decode non-field type SINGLETON to FieldType."
+        )
+    }
+
+    @Test
+    fun roundTrip_collectionType() {
+        val type = CollectionType(DUMMY_ENTITY_TYPE)
+        assertThat(type.encode().decode()).isEqualTo(type)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decodeAsFieldType() }
+        assertThat(e).hasMessageThat().isEqualTo(
+            "Cannot decode non-field type COLLECTION to FieldType."
+        )
+    }
+
+    @Test
+    fun roundTrip_referenceType() {
+        val type = ReferenceType(DUMMY_ENTITY_TYPE)
+        assertThat(type.encode().decode()).isEqualTo(type)
+    }
+
+    @Test
+    fun roundTrip_referenceFieldType() {
+        val type = FieldType.EntityRef(DUMMY_ENTITY_HASH)
+        assertThat(type.encode().decodeAsFieldType()).isEqualTo(type)
+    }
+
+    @Test
+    fun roundTrip_countType() {
+        val type = CountType()
+        assertThat(type.encode().decode()).isEqualTo(type)
+    }
+
+    @Test
+    fun roundTrip_tupleType() {
+        // (Person {name: Text}, Age {value: Number})
+        val type = TupleType(
+            EntityType(
+                Schema(
+                    names = setOf(SchemaName("Person")),
+                    fields = SchemaFields(
+                        singletons = mapOf("name" to FieldType.Text),
+                        collections = mapOf()
+                    ),
+                    hash = ""
+                )
             ),
-            hash = ""
-        )
-        when (tupleType) {
-            // Using `listOf` instead of containsExactly to ensure order is preserved when decoding.
-            is TupleType -> assertThat(tupleType.elementTypes).isEqualTo(
-                listOf(EntityType(personSchema), EntityType(ageSchema))
+            EntityType(
+                Schema(
+                    names = setOf(SchemaName("Age")),
+                    fields = SchemaFields(
+                        singletons = mapOf("value" to FieldType.Number),
+                        collections = mapOf()
+                    ),
+                    hash = ""
+                )
             )
-            else -> fail("TypeProto should have been decoded to [TupleType].")
-        }
+        )
+        assertThat(type.encode().decode()).isEqualTo(type)
     }
 
     @Test
-    fun decodesVariableTypeProtoAsVariableType() {
-        val variableTypeProto = """
-        variable {
-          name: "a"
-          constraint { constraint_type {
-            entity {
-              schema {
-                names: "Person"
-                fields: {
-                  key: "name"
-                  value: { primitive: TEXT }
-                }
-              }
-            }
-          } 
-          }
-        }
-        """.trimIndent()
-        val variableType = parseTypeProtoText(variableTypeProto).decode()
-        val expectedSchema = Schema(
-            names = setOf(SchemaName("Person")),
-            fields = SchemaFields(singletons=mapOf("name" to FieldType.Text), collections=mapOf()),
-            hash = ""
-        )
-        when (variableType) {
-            is TypeVariable -> assertThat(variableType).isEqualTo(
-                TypeVariable("a", EntityType(expectedSchema))
-            )
-            else -> fail("TypeProto should have been decoded to [TypeVariable].")
-        }
+    fun roundTrip_tupleFieldType() {
+        val type = FieldType.Tuple(FieldType.Text, FieldType.Number)
+        assertThat(type.encode().decodeAsFieldType()).isEqualTo(type)
     }
 
     @Test
-    fun decodesVariableTypeProtoAsUnconstrainedVariableType() {
-        val variableTypeProto = """
-        variable {
-          name: "a"
-        }
-        """.trimIndent()
-        val variableType = parseTypeProtoText(variableTypeProto).decode()
-        when (variableType) {
-            is TypeVariable -> assertThat(variableType).isEqualTo(TypeVariable("a", null))
-            else -> fail("TypeProto should have been decoded to [TypeVariable].")
-        }
+    fun roundTrip_variableType_constrained() {
+        val type = TypeVariable("a", DUMMY_ENTITY_TYPE)
+        assertThat(type.encode().decode()).isEqualTo(type)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decodeAsFieldType() }
+        assertThat(e).hasMessageThat().isEqualTo(
+            "Cannot decode non-field type VARIABLE to FieldType."
+        )
     }
 
+    @Test
+    fun roundTrip_variableType_unconstrained() {
+        val type = TypeVariable("a")
+        assertThat(type.encode().decode()).isEqualTo(type)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decodeAsFieldType() }
+        assertThat(e).hasMessageThat().isEqualTo(
+            "Cannot decode non-field type VARIABLE to FieldType."
+        )
+    }
+
+    @Test
+    fun roundTrip_variableType_constrained_maxAccessFlag() {
+        val type = TypeVariable("a", DUMMY_ENTITY_TYPE, true)
+        assertThat(type.encode().decode()).isEqualTo(type)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decodeAsFieldType() }
+        assertThat(e).hasMessageThat().isEqualTo(
+            "Cannot decode non-field type VARIABLE to FieldType."
+        )
+    }
+
+    @Test
+    fun roundTrip_variableType_unconstrained_maxAccessFlag() {
+        val type = TypeVariable("a", maxAccess = true)
+        assertThat(type.encode().decode()).isEqualTo(type)
+
+        val e = assertFailsWith<IllegalArgumentException> { type.encode().decodeAsFieldType() }
+        assertThat(e).hasMessageThat().isEqualTo(
+            "Cannot decode non-field type VARIABLE to FieldType."
+        )
+    }
+
+    companion object {
+        private const val DUMMY_ENTITY_HASH = "DUMMY_ENTITY_HASH"
+
+        private val DUMMY_ENTITY_TYPE = EntityType(
+            Schema(
+                names = setOf(SchemaName("Dummy")),
+                fields = SchemaFields(
+                    singletons = emptyMap(),
+                    collections = emptyMap()
+                ),
+                hash = DUMMY_ENTITY_HASH
+            )
+        )
+    }
 }

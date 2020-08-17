@@ -35,11 +35,14 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
+
+typealias RefModeStore = ActiveStore<RefModeStoreData, RefModeStoreOp, RawEntity?>
 
 @ExperimentalCoroutinesApi
 @RunWith(JUnit4::class)
@@ -79,13 +82,12 @@ class ReferenceModeStoreStabilityTest {
         )
         RamDisk.memory[containerKey] = VolatileEntry(singletonCrdt.data, 1)
 
-        val store = Store(
-            StoreOptions<RefModeStoreData, RefModeStoreOp, RawEntity?>(
+        val store: RefModeStore = DefaultActivationFactory(
+            StoreOptions(
                 storageKey,
-                SingletonType(EntityType(schema)),
-                StorageMode.ReferenceMode
+                SingletonType(EntityType(schema))
             )
-        ).activate()
+        )
 
         val modelValue = CompletableDeferred<RefModeStoreData.Singleton>()
         val id = store.on(
@@ -96,11 +98,14 @@ class ReferenceModeStoreStabilityTest {
             }
         )
 
-        store.onProxyMessage(ProxyMessage.SyncRequest(id))
+        withTimeout(10000) {
+            store.onProxyMessage(ProxyMessage.SyncRequest(id))
 
-        assertThat(modelValue.await().values).isEmpty()
-        assertThat(RamDisk.memory.get<CrdtSingleton.Data<RawEntity>>(containerKey)?.data?.values)
-            .isEmpty()
+            assertThat(modelValue.await().values).isEmpty()
+            assertThat(
+                RamDisk.memory.get<CrdtSingleton.Data<RawEntity>>(containerKey)?.data?.values
+            ).isEmpty()
+        }
     }
 
     @Test
@@ -119,13 +124,12 @@ class ReferenceModeStoreStabilityTest {
         )
         RamDisk.memory[containerKey] = VolatileEntry(setCrdt.data, 1)
 
-        val store = Store(
-            StoreOptions<RefModeStoreData, RefModeStoreOp, RawEntity?>(
+        val store: RefModeStore = DefaultActivationFactory(
+            StoreOptions(
                 storageKey,
-                CollectionType(EntityType(schema)),
-                StorageMode.ReferenceMode
+                CollectionType(EntityType(schema))
             )
-        ).activate()
+        )
 
         val modelValue = CompletableDeferred<RefModeStoreData.Set>()
         val id = store.on(
@@ -136,11 +140,13 @@ class ReferenceModeStoreStabilityTest {
             }
         )
 
-        store.onProxyMessage(ProxyMessage.SyncRequest(id))
+        withTimeout(10000) {
+            store.onProxyMessage(ProxyMessage.SyncRequest(id))
 
-        assertThat(modelValue.await().values).isEmpty()
-        assertThat(RamDisk.memory.get<CrdtSet.Data<RawEntity>>(containerKey)?.data?.values)
-            .isEmpty()
+            assertThat(modelValue.await().values).isEmpty()
+            assertThat(RamDisk.memory.get<CrdtSet.Data<RawEntity>>(containerKey)?.data?.values)
+                .isEmpty()
+        }
     }
 
     @Test
@@ -182,13 +188,12 @@ class ReferenceModeStoreStabilityTest {
         RamDisk.memory[backingKey.childKeyWithComponent("foo_value")] =
             VolatileEntry(entityCrdt.data, 1)
 
-        val store = Store(
-            StoreOptions<RefModeStoreData, RefModeStoreOp, RawEntity?>(
+        val store: RefModeStore = DefaultActivationFactory(
+            StoreOptions(
                 storageKey,
-                CollectionType(EntityType(schema)),
-                StorageMode.ReferenceMode
+                CollectionType(EntityType(schema))
             )
-        ).activate()
+        )
 
         val modelValue = CompletableDeferred<RefModeStoreData.Set>()
         val id = store.on(
@@ -245,13 +250,12 @@ class ReferenceModeStoreStabilityTest {
         RamDisk.memory[backingKey.childKeyWithComponent("foo_value")] =
             VolatileEntry(entityCrdt.data, 1)
 
-        val store = Store(
-            StoreOptions<RefModeStoreData, RefModeStoreOp, RawEntity?>(
+        val store: RefModeStore = DefaultActivationFactory(
+            StoreOptions(
                 storageKey,
-                SingletonType(EntityType(schema)),
-                StorageMode.ReferenceMode
+                SingletonType(EntityType(schema))
             )
-        ).activate()
+        )
 
         val modelValue = CompletableDeferred<RefModeStoreData.Singleton>()
         val id = store.on(
@@ -308,13 +312,12 @@ class ReferenceModeStoreStabilityTest {
         RamDisk.memory[backingKey.childKeyWithComponent("foo_value")] =
             VolatileEntry(entityCrdt.data, 1)
 
-        val store = Store(
-            StoreOptions<RefModeStoreData, RefModeStoreOp, RawEntity?>(
+        val store: RefModeStore = DefaultActivationFactory(
+            StoreOptions(
                 storageKey,
-                CollectionType(EntityType(schema)),
-                StorageMode.ReferenceMode
+                CollectionType(EntityType(schema))
             )
-        ).activate()
+        )
 
         val modelValue = CompletableDeferred<RefModeStoreData.Set>()
         val id = store.on(

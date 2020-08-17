@@ -8,81 +8,102 @@
  * http://polymer.github.io/PATENTS.txt
  */
 import {KotlinGenerationUtils, leftPad, quote} from './kotlin-generation-utils.js';
-import {SchemaNode} from './schema2graph.js';
 import {Schema} from '../runtime/schema.js';
-import {AddFieldOptions, SchemaDescriptorBase} from './schema2base.js';
 import {KTExtracter} from './kotlin-refinement-generator.js';
-import {escapeIdentifier, getTypeInfo} from './kotlin-codegen-shared.js';
+import {assert} from '../platform/assert-web.js';
 
 const ktUtils = new KotlinGenerationUtils();
 
 /**
- * Metadata about a field in a schema.
+ * Generates a Kotlin schema instance.
  */
-export type KotlinSchemaField = AddFieldOptions & {
-  type: string,
-  decodeFn: string,
-  defaultVal: string,
-  schemaType: string,
-  escaped: string,
-  nullableType: string
-};
+export async function generateSchema(schema: Schema): Promise<string> {
+  if (schema.equals(Schema.EMPTY)) return `arcs.core.data.Schema.EMPTY`;
 
-/**
- * Composes and holds a list of KotlinSchemaField for a SchemaNode.
- */
-export class KotlinSchemaDescriptor extends SchemaDescriptorBase {
+  const schemaNames = schema.names.map(n => `arcs.core.data.SchemaName("${n}")`);
+  const {refinement, query} = generatePredicates(schema);
 
-  readonly fields: KotlinSchemaField[] = [];
+  const singletons: string[] = [];
+  const collections: string[] = [];
 
-  constructor(node: SchemaNode, private forWasm: boolean) {
-    super(node);
-    this.process();
-  }
+  await visitSchemaFields(schema, ({isCollection, field, schemaType}) =>
+      (isCollection ? collections : singletons).push(`"${field}" to ${schemaType}`));
 
-  addField(opts: AddFieldOptions) {
-    if (opts.typeName === 'Reference' && this.forWasm) return;
+  return `\
+arcs.core.data.Schema(
+    setOf(${ktUtils.joinWithIndents(schemaNames, {startIndent: 8})}),
+    arcs.core.data.SchemaFields(
+        singletons = ${leftPad(ktUtils.mapOf(singletons, 30), 8, true)},
+        collections = ${leftPad(ktUtils.mapOf(collections, 30), 8, true)}
+    ),
+    ${quote(await schema.hash())},
+    refinementExpression = ${refinement},
+    queryExpression = ${query}
+)`;
+}
 
-    const typeInfo = getTypeInfo({name: opts.typeName, ...opts});
-    const type = typeInfo.type;
+interface SchemaField {
+  field: string;
+  isCollection: boolean;
+  schemaType: string;
+}
 
-    this.fields.push({
-      ...opts,
-      ...typeInfo,
-      escaped: escapeIdentifier(opts.field),
-      nullableType: type.endsWith('?') ? type : `${type}?`
-    });
+async function visitSchemaFields(schema: Schema, visitor: (field: SchemaField) => void) {
+  for (const [field, descriptor] of Object.entries(schema.fields)) {
+    switch (descriptor.kind) {
+      case 'schema-collection':
+        visitor({field, isCollection: true, schemaType: await getSchemaType(field, descriptor.schema)});
+        break;
+      case 'schema-primitive':
+      case 'kotlin-primitive':
+      case 'schema-reference':
+      case 'schema-nested':
+        visitor({field, isCollection: false, schemaType: await getSchemaType(field, descriptor)});
+        break;
+      case 'schema-ordered-list':
+        visitor({field, isCollection: false, schemaType: await getSchemaType(field, {
+          ...descriptor,
+          innerType: await getSchemaType(field, descriptor.schema)
+        })});
+        break;
+      default:
+        throw new Error(`Schema kind '${descriptor.kind}' for field '${field}' is not supported`);
+    }
   }
 }
 
-/**
- * Generates a schema instance for a given KotlinSchemaDescriptor
- */
-export function generateSchema(descriptor: KotlinSchemaDescriptor): string {
-  const schema = descriptor.node.schema;
-  if (schema.equals(Schema.EMPTY)) return `Schema.EMPTY`;
-
-  const schemaNames = schema.names.map(n => `SchemaName("${n}")`);
-  const {refinement, query} = generatePredicates(schema);
-
-  function generateFieldMap(isCollection: boolean): string {
-    const fieldPairs = descriptor.fields
-        .filter(f => !!f.isCollection === isCollection)
-        .map(({field, schemaType}) => `"${field}" to ${schemaType}`);
-    return leftPad(ktUtils.mapOf(fieldPairs, 30), 8, true);
+async function getSchemaType(field: string, {kind, schema, type, innerType}): Promise<string> {
+  const fieldType = 'arcs.core.data.FieldType';
+  if (kind === 'schema-primitive') {
+    switch (type) {
+      case 'Text': return `${fieldType}.Text`;
+      case 'URL': return `${fieldType}.Text`;
+      case 'Number': return `${fieldType}.Number`;
+      case 'BigInt': return `${fieldType}.BigInt`;
+      case 'Boolean': return `${fieldType}.Boolean`;
+      default: break;
+    }
+  } else if (kind === 'kotlin-primitive') {
+    switch (type) {
+      case 'Byte': return `${fieldType}.Byte`;
+      case 'Short': return `${fieldType}.Short`;
+      case 'Int': return `${fieldType}.Int`;
+      case 'Long': return `${fieldType}.Long`;
+      case 'Char': return `${fieldType}.Char`;
+      case 'Float': return `${fieldType}.Float`;
+      case 'Double': return `${fieldType}.Double`;
+      default: break;
+    }
+  } else if (kind === 'schema-reference') {
+    return `${fieldType}.EntityRef(${quote(await schema.model.getEntitySchema().hash())})`;
+  } else if (kind === 'schema-nested') {
+    return `${fieldType}.InlineEntity(${quote(await schema.model.getEntitySchema().hash())})`;
+  } else if (kind === 'schema-ordered-list') {
+    assert(innerType, 'innerType must be provided for Lists');
+    return `${fieldType}.ListOf(${innerType})`;
   }
 
-  return `\
-Schema(
-    setOf(${ktUtils.joinWithIndents(schemaNames, {startIndent: 8})}),
-    SchemaFields(
-        singletons = ${generateFieldMap(false)},
-        collections = ${generateFieldMap(true)}
-    ),
-    ${quote(descriptor.node.hash)},
-    refinement = ${refinement},
-    query = ${query}
-)`;
+  throw new Error(`Schema kind '${kind}' for field '${field}' and type '${type}' is not supported`);
 }
 
 function generatePredicates(schema: Schema): {query: string, refinement: string} {
@@ -92,11 +113,7 @@ function generatePredicates(schema: Schema): {query: string, refinement: string}
 
   return {
     // TODO(cypher1): Support multiple queries.
-    query: hasQuery ? `{ data, queryArgs ->
-${expression}
-    }` : 'null',
-    refinement: (hasRefinement && !hasQuery) ? `{ data ->
-${expression}
-    }` : `{ _ -> true }`
+    query: hasQuery ? `${expression}` : 'true.asExpr()',
+    refinement: (hasRefinement && !hasQuery) ? `${expression}` : `true.asExpr()`
   };
 }

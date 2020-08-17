@@ -11,17 +11,41 @@
 
 package arcs.core.data
 
-/**
- * This class contains metadata about a [Particle] in a [Recipe].
- *
- * @property name the name of the particle.
- * @property connections all the handle connections of the particle indexed by the connection name.
- * @property location the location of the implementation.
- */
+/** Specification of an Arcs [Particle]. */
 data class ParticleSpec(
+    /** The name of the particle. */
     val name: String,
+    /** All the handle connections of the particle indexed by the connection name. */
     val connections: Map<String, HandleConnectionSpec>,
+    /** The location of the implementation. */
     val location: String,
     val claims: List<Claim> = emptyList(),
-    val checks: List<Check> = emptyList()
-)
+    val checks: List<Check> = emptyList(),
+    val annotations: List<Annotation> = emptyList()
+) {
+    /** Indicates whether the particle is an isolated (non-egress) particle. */
+    val isolated: Boolean
+        get() {
+            val isolated = annotations.any { it.name == "isolated" }
+            val egress = annotations.any { it.name == "egress" }
+            require(!(isolated && egress)) {
+                "Particle cannot be tagged with both @isolated and @egress."
+            }
+            return isolated
+        }
+
+    /**
+     * Indicates whether the particle is an egress (non-isolated) particle.
+     *
+     * Particles are considered egress particles by default.
+     */
+    val egress: Boolean
+        get() = !isolated
+
+    /** Optional egress type of the particle. Always null for isolated particles. */
+    val egressType: String?
+        get() {
+            val egress = annotations.find { it.name == "egress" } ?: return null
+            return egress.getOptionalStringParam("type")
+        }
+}

@@ -14,12 +14,10 @@ package arcs.core.storage
 import arcs.core.common.Referencable
 import arcs.core.common.ReferenceId
 import arcs.core.crdt.VersionMap
+import arcs.core.data.Capability.Ttl
 import arcs.core.data.RawEntity
 import arcs.core.data.Schema
-import arcs.core.data.Ttl
 import arcs.core.util.Time
-import kotlin.coroutines.CoroutineContext
-import kotlinx.coroutines.Dispatchers
 
 /**
  * [arcs.core.storage.ReferenceModeStore] uses an expanded notion of Reference that also includes a
@@ -46,16 +44,16 @@ data class Reference(
     fun ensureTimestampsAreSet(time: Time, ttl: Ttl) {
         if (_creationTimestamp == RawEntity.UNINITIALIZED_TIMESTAMP) {
             _creationTimestamp = time.currentTimeMillis
-            if (ttl != Ttl.Infinite) {
+            if (ttl != Ttl.Infinite()) {
                 _expirationTimestamp = ttl.calculateExpiration(time)
             }
         }
     }
 
-    override suspend fun dereference(coroutineContext: CoroutineContext): RawEntity? =
+    override suspend fun dereference(): RawEntity? =
         requireNotNull(dereferencer) {
-            "Boom"
-        }.dereference(this, coroutineContext)
+            "No dereferencer installed on Reference object"
+        }.dereference(this)
 
     fun referencedStorageKey() = storageKey.childKeyWithComponent(id)
 
@@ -83,8 +81,7 @@ data class Reference(
 /** Defines an object capable of de-referencing a [Reference]. */
 interface Dereferencer<T> {
     suspend fun dereference(
-        reference: Reference,
-        coroutineContext: CoroutineContext = Dispatchers.Default
+        reference: Reference
     ): T?
 
     /**

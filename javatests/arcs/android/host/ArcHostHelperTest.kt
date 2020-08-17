@@ -29,12 +29,12 @@ import arcs.android.sdk.host.toComponentName
 import arcs.core.common.ArcId
 import arcs.core.data.EntityType
 import arcs.core.data.FieldType.Companion.Text
+import arcs.core.data.HandleMode
 import arcs.core.data.Plan
 import arcs.core.data.Schema
 import arcs.core.data.SchemaFields
 import arcs.core.data.SchemaName
 import arcs.core.host.ArcHost
-import arcs.core.data.HandleMode
 import arcs.core.host.ArcHostException
 import arcs.core.host.ArcState
 import arcs.core.host.ArcStateChangeCallback
@@ -43,6 +43,8 @@ import arcs.core.host.ParticleIdentifier
 import arcs.core.storage.keys.VolatileStorageKey
 import arcs.core.util.guardedBy
 import com.google.common.truth.Truth.assertThat
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -52,7 +54,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
-import kotlin.coroutines.experimental.suspendCoroutine
 
 @RunWith(AndroidJUnit4::class)
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -68,10 +69,12 @@ class ArcHostHelperTest {
         "42"
     )
 
+    val storageKey = VolatileStorageKey(ArcId.newForTest("foo"), "bar")
+    val personType = EntityType(personSchema)
     val connection = Plan.HandleConnection(
-        VolatileStorageKey(ArcId.newForTest("foo"), "bar"),
+        Plan.Handle(storageKey, personType, emptyList()),
         HandleMode.ReadWrite,
-        EntityType(personSchema)
+        personType
     )
 
     val particleSpec = Plan.Particle(
@@ -118,7 +121,8 @@ class ArcHostHelperTest {
         }
 
         override suspend fun addOnArcStateChange(
-            arcId: ArcId, block: ArcStateChangeCallback
+            arcId: ArcId,
+            block: ArcStateChangeCallback
         ): ArcStateChangeRegistration {
             TODO("Not yet implemented")
         }
@@ -127,8 +131,7 @@ class ArcHostHelperTest {
             stopArcCalls.add(partition)
         }
 
-        override suspend fun lookupArcHostStatus(partition: Plan.Partition): ArcState =
-            ArcState.Stopped
+        override suspend fun lookupArcHostStatus(partition: Plan.Partition) = status
 
         override suspend fun isHostForParticle(particle: Plan.Particle) =
             registeredParticles.contains(ParticleIdentifier.from(particle.location))
@@ -138,12 +141,14 @@ class ArcHostHelperTest {
 
         companion object {
             var throws = false
+            var status = ArcState.Stopped
         }
     }
 
     @Before
     fun setUp() {
         TestArcHost.throws = false
+        TestArcHost.status = ArcState.Stopped
         context = InstrumentationRegistry.getInstrumentation().targetContext
         service = Robolectric.setupService(TestAndroidArcHostService::class.java)
         arcHost = TestArcHost()
@@ -184,25 +189,21 @@ class ArcHostHelperTest {
         val actual = runWithResult(lookupIntent) { bundle ->
             ArcHostHelper.getStringResult(bundle)
         }
-        assertThat(actual).isEqualTo(ArcState.Stopped.toString())
+        assertThat(actual).isEqualTo("Stopped")
     }
 
-    private fun <T> runWithResult(
-        intent: Intent,
-        transformer: (Bundle?) -> T
-    ): T = runBlocking {
-        suspendCoroutine<T> { coroutine ->
-            ArcHostHelper.setResultReceiver(
-                intent,
-                object : ResultReceiver(Handler()) {
-                    override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
-                        val state = transformer(resultData)
-                        coroutine.resume(state!!)
-                    }
-                }
-            )
-            helper.onStartCommand(intent)
+    @Test
+    fun onStartCommand_lookupArcHostStatus_returnsErrorWithExceptionInfo() = runBlockingTest {
+        TestArcHost.status = ArcState.errorWith(IllegalStateException("oops"))
+        val lookupIntent = planPartition.createLookupArcStatusIntent(
+            TestAndroidArcHostService::class.toComponentName(context),
+            arcHost.hostId
+        )
+
+        val actual = runWithResult(lookupIntent) { bundle ->
+            ArcHostHelper.getStringResult(bundle)
         }
+        assertThat(actual).isEqualTo("Error|java.lang.IllegalStateException: oops")
     }
 
     @Test
@@ -266,5 +267,23 @@ class ArcHostHelperTest {
 
         helper.onStartCommandSuspendable(unpauseIntent)
         assertThat(arcHost.paused).isFalse()
+    }
+
+    private fun <T> runWithResult(
+        intent: Intent,
+        transformer: (Bundle?) -> T
+    ): T = runBlocking {
+        suspendCoroutine<T> { coroutine ->
+            ArcHostHelper.setResultReceiver(
+                intent,
+                object : ResultReceiver(Handler()) {
+                    override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                        val state = transformer(resultData)
+                        coroutine.resume(state!!)
+                    }
+                }
+            )
+            helper.onStartCommand(intent)
+        }
     }
 }

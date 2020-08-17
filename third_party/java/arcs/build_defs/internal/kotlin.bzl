@@ -22,7 +22,6 @@ load(
     "java_library",
     "java_test",
 )
-load("//third_party/java/arcs/build_defs:sigh.bzl", "sigh_command")
 load("//tools/build_defs/android:rules.bzl", "android_local_test")
 load(
     "//tools/build_defs/kotlin:rules.bzl",
@@ -31,10 +30,14 @@ load(
 )
 load(":kotlin_serviceloader_registry.bzl", "kotlin_serviceloader_registry")
 load(":kotlin_wasm_annotations.bzl", "kotlin_wasm_annotations")
-load(":util.bzl", "manifest_only", "merge_lists", "replace_arcs_suffix")
-load(":plan.oss.bzl", "recipe2plan")
-
-ARCS_SDK_DEPS = ["//third_party/java/arcs"]
+load(":tools.oss.bzl", "arcs_tool_recipe2plan")
+load(
+    ":util.bzl",
+    "create_build_test",
+    "manifest_only",
+    "merge_lists",
+    "replace_arcs_suffix",
+)
 
 _WASM_SUFFIX = "-wasm"
 
@@ -124,6 +127,7 @@ def arcs_kt_jvm_library(**kwargs):
         )
 
     kt_jvm_library(**kwargs)
+    create_build_test(kwargs["name"])
 
 def arcs_kt_android_library(**kwargs):
     """Wrapper around kt_android_library for Arcs.
@@ -138,6 +142,7 @@ def arcs_kt_android_library(**kwargs):
     kotlincopts = kwargs.pop("kotlincopts", [])
     kwargs["kotlincopts"] = merge_lists(kotlincopts, COMMON_KOTLINC_OPTS + JVM_KOTLINC_OPTS)
     kt_android_library(**kwargs)
+    create_build_test(kwargs["name"])
 
 def arcs_kt_native_library(**kwargs):
     """Wrapper around kt_native_library for Arcs.
@@ -230,6 +235,7 @@ def _extract_particle_name(src):
 def arcs_kt_particles(
         name,
         package,
+        arcs_sdk_deps,
         srcs = [],
         deps = [],
         platforms = DEFAULT_PARTICLE_PLATFORMS,
@@ -241,6 +247,7 @@ def arcs_kt_particles(
     Args:
       name: name of the target to create
       package: Kotlin package for the particles
+      arcs_sdk_deps: build targets for the Arcs SDK to be included
       srcs: List of source files to include. Each file must contain a Kotlin
         class of the same name, which must match the name of a particle defined
         in a .arcs file.
@@ -253,7 +260,7 @@ def arcs_kt_particles(
     """
     _check_platforms(platforms)
 
-    deps = ARCS_SDK_DEPS + deps
+    deps = arcs_sdk_deps + deps
 
     if "jvm" in platforms and "wasm" in platforms:
         fail("Particles can only depend on one of jvm or wasm")
@@ -415,6 +422,7 @@ def arcs_kt_android_test_suite(
         )
 
 def arcs_kt_plan(name,
+                 arcs_sdk_deps,
                  srcs = [],
                  data = [],
                  deps = [],
@@ -448,6 +456,7 @@ def arcs_kt_plan(name,
 
     Args:
       name: the name of the target to create
+      arcs_sdk_deps: build targets for the Arcs SDK to be included
       srcs: list of Arcs manifest files
       data: list of Arcs manifests needed at runtime
       deps: list of dependencies (jars)
@@ -464,26 +473,28 @@ def arcs_kt_plan(name,
 
     for src in srcs:
         genrule_name = replace_arcs_suffix(src, "_GeneratedPlan")
-        outs.append(genrule_name)
+        out = replace_arcs_suffix(src, "_GeneratedPlan.kt")
+        outs.append(out)
         rest = [s for s in srcs if s != src]
-        recipe2plan(
+        arcs_tool_recipe2plan(
             name = genrule_name,
             srcs = [src],
-            data = data + rest,
-            deps = deps
+            outs = [out],
+            deps = deps + data + rest,
+#            data = data + rest,
+#            deps = deps
         )
 
     deps = manifest_only(deps, inverse = True)
 
     arcs_kt_library(
         name = name,
-        srcs = [":" + out for out in outs],
+        srcs = outs,
         platforms = platforms,
         visibility = visibility,
-        testonly=testonly,
-        deps = ARCS_SDK_DEPS + deps,
+        deps = arcs_sdk_deps + deps,
     )
-    return {"outs": outs, "deps": ARCS_SDK_DEPS}
+    return {"outs": outs, "deps": arcs_sdk_deps}
 
 def arcs_kt_jvm_test_suite(
         name,

@@ -24,12 +24,12 @@ fun ReferencableReferenceListProto.toReferencableList(): ReferencableList<Refere
     val fieldType = FieldType.EntityRef(type)
     return valueList.mapTo(mutableListOf<Reference>()) {
         it.toReference()
-    }.toReferencable(fieldType)
+    }.toReferencable(FieldType.ListOf(fieldType))
 }
 
 /** Serializes a [ReferencablePrimitive] to its proto form. */
 fun ReferencableList<*>.toReferenceListProto(): ReferencableReferenceListProto {
-    val type = itemType
+    val type = (itemType as FieldType.ListOf).primitiveType
     return when (type) {
         is FieldType.EntityRef -> {
             ReferencableReferenceListProto

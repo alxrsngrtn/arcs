@@ -13,6 +13,7 @@ package arcs.core.storage
 
 import arcs.core.crdt.CrdtSet
 import arcs.core.crdt.VersionMap
+import arcs.core.data.Capability.Ttl
 import arcs.core.data.CollectionType
 import arcs.core.data.EntityType
 import arcs.core.data.FieldType
@@ -21,17 +22,14 @@ import arcs.core.data.RawEntity.Companion.UNINITIALIZED_TIMESTAMP
 import arcs.core.data.ReferenceType
 import arcs.core.data.Schema
 import arcs.core.data.SchemaFields
-import arcs.core.data.Ttl
 import arcs.core.data.util.ReferencablePrimitive
 import arcs.core.data.util.toReferencable
 import arcs.core.storage.driver.RamDiskDriverProvider
 import arcs.core.storage.keys.RamDiskStorageKey
 import arcs.core.storage.referencemode.ReferenceModeStorageKey
-import arcs.core.util.Scheduler
 import arcs.core.util.testutil.LogRule
 import arcs.jvm.util.testutil.FakeTime
 import com.google.common.truth.Truth.assertThat
-import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
@@ -39,8 +37,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-typealias RefCollectionStore =
-    DirectStore<CrdtSet.Data<Reference>, CrdtSet.Operation<Reference>, Set<Reference>>
+typealias CollectionStore<T> = ActiveStore<CrdtSet.Data<T>, CrdtSet.Operation<T>, Set<T>>
 
 @Suppress("EXPERIMENTAL_API_USAGE")
 @RunWith(JUnit4::class)
@@ -56,12 +53,11 @@ class ReferenceTest {
         RamDiskDriverProvider()
         val refModeKey = ReferenceModeStorageKey(backingKey, collectionKey)
         val options =
-            StoreOptions<CrdtSet.Data<RawEntity>, CrdtSet.Operation<RawEntity>, Set<RawEntity>>(
+            StoreOptions(
                 storageKey = refModeKey,
-                type = CollectionType(EntityType(Person.SCHEMA)),
-                mode = StorageMode.ReferenceMode
+                type = CollectionType(EntityType(Person.SCHEMA))
             )
-        val store = Store(options).activate()
+        val store: CollectionStore<RawEntity> = DefaultActivationFactory(options)
 
         val addPeople = listOf(
             CrdtSet.Operation.Add(
@@ -84,14 +80,14 @@ class ReferenceTest {
 
         log("Setting up direct store to collection of references")
         val collectionOptions =
-            StoreOptions<CrdtSet.Data<Reference>, CrdtSet.Operation<Reference>, Set<Reference>>(
+            StoreOptions(
                 storageKey = collectionKey,
-                type = CollectionType(ReferenceType(EntityType(Person.SCHEMA))),
-                mode = StorageMode.Direct
+                type = CollectionType(ReferenceType(EntityType(Person.SCHEMA)))
             )
 
         @Suppress("UNCHECKED_CAST")
-        val directCollection = Store(collectionOptions).activate() as RefCollectionStore
+        val directCollection: CollectionStore<Reference> =
+            DefaultActivationFactory(collectionOptions)
 
         val job = Job()
         val me = directCollection.on(ProxyCallback {
@@ -102,7 +98,7 @@ class ReferenceTest {
         directCollection.idle()
         job.join()
 
-        val collectionItems = directCollection.getLocalData()
+        val collectionItems = (directCollection as DirectStore).getLocalData()
         assertThat(collectionItems.values).hasSize(3)
 
         val expectedPeople = listOf(
@@ -115,7 +111,7 @@ class ReferenceTest {
             val ref = it.value
             ref.dereferencer = dereferencer
             val expectedPerson = expectedPeople[ref.id] ?: error("Bad reference: $ref")
-            val dereferenced = ref.dereference(coroutineContext)
+            val dereferenced = ref.dereference()
             val actualPerson = requireNotNull(dereferenced).toPerson()
 
             assertThat(actualPerson).isEqualTo(expectedPerson)

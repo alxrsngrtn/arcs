@@ -6,7 +6,7 @@ load(
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//java/arcs:allowed-packages"])
 
 arcs_kt_android_library(
     name = "support",
@@ -41,7 +41,6 @@ arcs_kt_android_test_suite(
         "//third_party/android/androidx_test/core",
         "//third_party/android/androidx_test/ext/junit",
         "//third_party/android/androidx_test/runner/monitor",
-        "//third_party/java/androidx/lifecycle",
         "//third_party/java/junit:junit-android",
         "//third_party/java/robolectric",
         "//third_party/java/robolectric:shadows",

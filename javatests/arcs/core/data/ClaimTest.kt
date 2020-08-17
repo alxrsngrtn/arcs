@@ -11,7 +11,6 @@
 
 package arcs.core.data
 
-
 import arcs.core.data.InformationFlowLabel.Predicate
 import arcs.core.data.InformationFlowLabel.SemanticTag
 import com.google.common.truth.Truth.assertThat
@@ -21,11 +20,42 @@ import org.junit.runners.JUnit4
 
 @RunWith(JUnit4::class)
 class ClaimTest {
-    private val handle = Recipe.Handle("thing",  Recipe.Handle.Fate.CREATE, TypeVariable("thing"))
+    private val handle = Recipe.Handle("thing", Recipe.Handle.Fate.CREATE, TypeVariable("thing"))
     private val connectionSpec = HandleConnectionSpec("data", HandleMode.Read, TypeVariable("data"))
-    private val connection = Recipe.Particle.HandleConnection(connectionSpec, handle)
+    private val connection = Recipe.Particle.HandleConnection(
+        connectionSpec,
+        handle,
+        TypeVariable("thing")
+    )
     private val particleSpec = ParticleSpec("Reader", mapOf("data" to connectionSpec), "Location")
     private val particle = Recipe.Particle(particleSpec, listOf(connection))
+
+    @Test
+    fun prettyPrintAssumeClaim() {
+        val assume = Claim.Assume(
+            AccessPath(
+                AccessPath.Root.Store("store"),
+                listOf(AccessPath.Selector.Field("field"))
+            ),
+            Predicate.Label(SemanticTag("packageName"))
+        )
+        assertThat("$assume").isEqualTo("s:store.field is packageName")
+    }
+
+    @Test
+    fun prettyPrintDerivesFromClaim() {
+        val derivesFrom = Claim.DerivesFrom(
+            AccessPath(
+                AccessPath.Root.Store("target"),
+                listOf(AccessPath.Selector.Field("bar"))
+            ),
+            AccessPath(
+                AccessPath.Root.Store("source"),
+                listOf(AccessPath.Selector.Field("foo"))
+            )
+        )
+        assertThat("$derivesFrom").isEqualTo("s:target.bar derives-from s:source.foo")
+    }
 
     @Test
     fun instantiateAssumeForParticle() {

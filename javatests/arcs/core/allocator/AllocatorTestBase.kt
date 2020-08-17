@@ -1,19 +1,34 @@
 package arcs.core.allocator
 
-import arcs.core.common.ArcId
 import arcs.core.common.Id
 import arcs.core.data.Annotation
 import arcs.core.data.Capabilities
-import arcs.core.data.CreateableStorageKey
+import arcs.core.data.Capability.Shareable
+import arcs.core.data.CreatableStorageKey
 import arcs.core.data.EntityType
 import arcs.core.data.Plan
-import arcs.core.host.*
+import arcs.core.host.ArcHostContext
+import arcs.core.host.ArcState
+import arcs.core.host.DeserializedException
+import arcs.core.host.EntityHandleManager
+import arcs.core.host.HelloHelloPlan
+import arcs.core.host.HostRegistry
+import arcs.core.host.ParticleNotFoundException
+import arcs.core.host.ParticleState
+import arcs.core.host.PersonPlan
+import arcs.core.host.ReadPerson
+import arcs.core.host.ReadPerson_Person
+import arcs.core.host.TestingHost
+import arcs.core.host.TestingJvmProdHost
+import arcs.core.host.WritePerson
+import arcs.core.host.toRegistration
 import arcs.core.storage.CapabilitiesResolver
 import arcs.core.storage.api.DriverAndKeyConfigurator
 import arcs.core.storage.driver.RamDisk
 import arcs.core.storage.driver.RamDiskDriverProvider
-import arcs.core.storage.driver.VolatileDriverProvider
+import arcs.core.storage.driver.VolatileDriverProviderFactory
 import arcs.core.testutil.assertSuspendingThrows
+import arcs.core.testutil.fail
 import arcs.core.util.Log
 import arcs.core.util.plus
 import arcs.core.util.testutil.LogRule
@@ -22,6 +37,9 @@ import arcs.jvm.host.ExplicitHostRegistry
 import arcs.jvm.host.JvmSchedulerProvider
 import arcs.jvm.util.testutil.FakeTime
 import com.google.common.truth.Truth.assertThat
+import java.lang.IllegalArgumentException
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -31,9 +49,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
-import java.lang.IllegalArgumentException
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.EmptyCoroutineContext
 
 @RunWith(JUnit4::class)
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -76,7 +91,8 @@ open class AllocatorTestBase {
     /** Return the [ArcHost] that contains all isolatable [Particle]s. */
     open fun pureHost() = TestingJvmProdHost(schedulerProvider)
 
-    open val storageCapability = Capabilities.TiedToRuntime
+    open val storageCapability = Capabilities(Shareable(true))
+
     open fun runAllocatorTest(
         coroutineContext: CoroutineContext = EmptyCoroutineContext,
         testBody: suspend CoroutineScope.() -> Unit
@@ -96,6 +112,7 @@ open class AllocatorTestBase {
         RamDisk.clear()
         DriverAndKeyConfigurator.configureKeyParsers()
         RamDiskDriverProvider()
+        VolatileDriverProviderFactory()
 
         readingExternalHost = readingHost()
         writingExternalHost = writingHost()
@@ -130,7 +147,7 @@ open class AllocatorTestBase {
         arc: Arc,
         arcState: ArcState
     ) {
-        check(arc.partitions.isNotEmpty()) { "No partitions for ${arc.id}"}
+        check(arc.partitions.isNotEmpty()) { "No partitions for ${arc.id}" }
         arc.partitions.forEach { partition ->
             val hostId = partition.arcHost
             val status = when {
@@ -165,7 +182,8 @@ open class AllocatorTestBase {
         )
 
         val allStorageKeyLens =
-            Plan.Particle.handlesLens.traverse() + Plan.HandleConnection.storageKeyLens
+            Plan.Particle.handlesLens.traverse() + Plan.HandleConnection.handleLens +
+                Plan.Handle.storageKeyLens
 
         // fetch the allocator replaced key
         val readPersonKey = findPartitionFor(
@@ -178,19 +196,19 @@ open class AllocatorTestBase {
 
         val purePartition = findPartitionFor(arc.partitions, "PurePerson")
 
-        val storageKeyLens = Plan.HandleConnection.storageKeyLens
+        val storageKeyLens = Plan.HandleConnection.handleLens + Plan.Handle.storageKeyLens
 
         assertThat(arc.partitions).containsExactly(
             Plan.Partition(
                 arc.id.toString(),
                 readingHost.hostId,
-                // replace the CreateableKeys with the allocated keys
+                // replace the CreatableKeys with the allocated keys
                 listOf(allStorageKeyLens.mod(readPersonParticle) { readPersonKey })
             ),
             Plan.Partition(
                 arc.id.toString(),
                 prodHost.hostId,
-                // replace the CreateableKeys with the allocated keys
+                // replace the CreatableKeys with the allocated keys
                 listOf(Plan.Particle.handlesLens.mod(purePartition.particles[0]) {
                     mapOf(
                         "inputPerson" to storageKeyLens.mod(it["inputPerson"]!!) { writePersonKey },
@@ -201,7 +219,7 @@ open class AllocatorTestBase {
             Plan.Partition(
                 arc.id.toString(),
                 writingHost.hostId,
-                // replace the CreateableKeys with the allocated keys
+                // replace the CreatableKeys with the allocated keys
                 listOf(allStorageKeyLens.mod(writePersonParticle) { writePersonKey })
             )
         )
@@ -211,7 +229,7 @@ open class AllocatorTestBase {
     open fun allocator_verifyStorageKeysCreated() = runAllocatorTest {
         PersonPlan.particles.forEach {
             it.handles.forEach { (_, connection) ->
-                assertThat(connection.storageKey).isInstanceOf(CreateableStorageKey::class.java)
+                assertThat(connection.storageKey).isInstanceOf(CreatableStorageKey::class.java)
             }
         }
         log("Plan handles are using correct storage keys")
@@ -221,7 +239,7 @@ open class AllocatorTestBase {
         arc.partitions.flatMap { it.particles }.forEach { particle ->
             particle.handles.forEach { (_, connection) ->
                 assertThat(connection.storageKey).isNotInstanceOf(
-                    CreateableStorageKey::class.java
+                    CreatableStorageKey::class.java
                 )
             }
         }
@@ -254,25 +272,28 @@ open class AllocatorTestBase {
     open fun allocator_verifyStorageKeysNotOverwritten() = runAllocatorTest {
         val idGenerator = Id.Generator.newSession()
         val testArcId = idGenerator.newArcId("Test")
-        VolatileDriverProvider(testArcId)
 
-        val inputPerson = CapabilitiesResolver(
-            CapabilitiesResolver.CapabilitiesResolverOptions(testArcId)
-        ).createStorageKey(Capabilities.TiedToArc, EntityType(personSchema), "inputPerson")
-
-        val outputPerson = CapabilitiesResolver(
-            CapabilitiesResolver.CapabilitiesResolverOptions(testArcId)
-        ).createStorageKey(Capabilities.TiedToArc, EntityType(personSchema), "outputPerson")
+        val resolver = CapabilitiesResolver(CapabilitiesResolver.Options(testArcId))
+        val inputPerson = resolver.createStorageKey(
+            Capabilities.fromAnnotation(Annotation.createCapability("tiedToArc")),
+            EntityType(personSchema),
+            "inputPerson"
+        )
+        val outputPerson = resolver.createStorageKey(
+            Capabilities.fromAnnotation(Annotation.createCapability("tiedToArc")),
+            EntityType(personSchema),
+            "outputPerson"
+        )
 
         val allStorageKeyLens =
             Plan.particleLens.traverse() + Plan.Particle.handlesLens.traverse() +
-                Plan.HandleConnection.storageKeyLens
+                Plan.HandleConnection.handleLens + Plan.Handle.storageKeyLens
 
         val testPlan = allStorageKeyLens.mod(PersonPlan) { storageKey ->
-            storageKey as CreateableStorageKey
+            storageKey as CreatableStorageKey
             when (storageKey.nameFromManifest) {
-                "inputPerson" -> inputPerson!!
-                "outputPerson" -> outputPerson!!
+                "inputPerson" -> inputPerson
+                "outputPerson" -> outputPerson
                 else -> storageKey
             }
         }
@@ -281,9 +302,9 @@ open class AllocatorTestBase {
 
         val testKeys = listOf(inputPerson, outputPerson)
 
-        arc.partitions.flatMap { it.particles }.forEach {
-            particle -> particle.handles.forEach { (_, connection) ->
-               assertThat(connection.storageKey).isIn(testKeys)
+        arc.partitions.flatMap { it.particles }.forEach { particle ->
+            particle.handles.forEach { (_, connection) ->
+                assertThat(connection.storageKey).isIn(testKeys)
             }
         }
     }
@@ -335,6 +356,44 @@ open class AllocatorTestBase {
         }
     }
 
+    private fun particleToContext(context: ArcHostContext, particle: Plan.Particle) =
+        context.particles.first {
+            it.planParticle.particleName == particle.particleName
+        }
+
+    @Test
+    open fun allocator_canRunArcWithSameParticleTwice() = runAllocatorTest {
+        val arc = allocator.startArcForPlan(HelloHelloPlan)
+        val arcId = arc.id
+
+        arc.waitForStart()
+
+        val readingContext = requireNotNull(
+            readingExternalHost.arcHostContext(arcId.toString())
+        )
+        val writingContext = requireNotNull(
+            writingExternalHost.arcHostContext(arcId.toString())
+        )
+
+        val readPersonContext = particleToContext(readingContext, readPersonParticle)
+
+        val writePersonContext = particleToContext(writingContext, writePersonParticle)
+
+        writePersonContext.particle.let { particle ->
+            particle as WritePerson
+            particle.await()
+            assertThat(particle.firstStartCalled).isTrue()
+            assertThat(particle.wrote).isTrue()
+        }
+
+        readPersonContext.particle.let { particle ->
+            particle as ReadPerson
+            particle.await()
+            assertThat(particle.firstStartCalled).isTrue()
+            assertThat(particle.name).isEqualTo("Hello Hello John Wick")
+        }
+    }
+
     @Test
     open fun allocator_canStartArcInTwoExternalHosts() = runAllocatorTest {
         val arc = allocator.startArcForPlan(PersonPlan)
@@ -361,13 +420,9 @@ open class AllocatorTestBase {
 
         assertAllStatus(arc, ArcState.Running)
 
-        val readPersonContext = requireNotNull(
-            readingContext.particles[readPersonParticle.particleName]
-        )
+        val readPersonContext = particleToContext(readingContext, readPersonParticle)
 
-        val writePersonContext = requireNotNull(
-            writingContext.particles[writePersonParticle.particleName]
-        )
+        val writePersonContext = particleToContext(writingContext, writePersonParticle)
 
         assertThat(readPersonContext.particleState).isEqualTo(ParticleState.Running)
         assertThat(writePersonContext.particleState).isEqualTo(ParticleState.Running)
@@ -405,13 +460,9 @@ open class AllocatorTestBase {
 
         assertAllStatus(arc, ArcState.Stopped)
 
-        val readPersonContext = requireNotNull(
-            readingContext.particles[readPersonParticle.particleName]
-        )
+        val readPersonContext = particleToContext(readingContext, readPersonParticle)
 
-        val writePersonContext = requireNotNull(
-            writingContext.particles[writePersonParticle.particleName]
-        )
+        val writePersonContext = particleToContext(writingContext, writePersonParticle)
 
         assertThat(readPersonContext.particleState).isEqualTo(ParticleState.Stopped)
         assertThat(writePersonContext.particleState).isEqualTo(ParticleState.Stopped)
@@ -438,7 +489,8 @@ open class AllocatorTestBase {
         val arc2 = allocator.startArcForPlan(
             Plan(
                 PersonPlan.particles,
-                listOf(Annotation.arcId(arcId.toString()))
+                PersonPlan.handles,
+                listOf(Annotation.createArcId(arcId.toString()))
             )
         )
         arc2.waitForStart()
@@ -452,13 +504,9 @@ open class AllocatorTestBase {
 
         assertAllStatus(arc, ArcState.Running)
 
-        val readPersonContext = requireNotNull(
-            readingContextAfter.particles[readPersonParticle.particleName]
-        )
+        val readPersonContext = particleToContext(readingContextAfter, readPersonParticle)
 
-        val writePersonContext = requireNotNull(
-            writingContextAfter.particles[writePersonParticle.particleName]
-        )
+        val writePersonContext = particleToContext(writingContextAfter, writePersonParticle)
 
         assertThat(readPersonContext.particleState).isEqualTo(ParticleState.Running)
         assertThat(writePersonContext.particleState).isEqualTo(ParticleState.Running)
@@ -517,7 +565,8 @@ open class AllocatorTestBase {
         val arc2 = allocator.startArcForPlan(
             Plan(
                 PersonPlan.particles,
-                listOf(Annotation.arcId(arc.id.toString()))
+                PersonPlan.handles,
+                listOf(Annotation.createArcId(arc.id.toString()))
             )
         )
 
@@ -532,8 +581,33 @@ open class AllocatorTestBase {
         val arc = allocator.startArcForPlan(PersonPlan)
         arc.onError { deferred.complete(true) }
         deferred.await()
-        assertThat(writingExternalHost.arcHostContext(arc.id.toString())?.arcState).isEqualTo(
-            ArcState.Error
-        )
+
+        val arcState = writingExternalHost.arcHostContext(arc.id.toString())!!.arcState
+        assertThat(arcState).isEqualTo(ArcState.Error)
+        arcState.cause.let {
+            assertThat(it).isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(it).hasMessageThat().isEqualTo("Boom!")
+        }
+    }
+
+    @Test
+    open fun allocator_startArc_particleException_failsWaitForStart() = runAllocatorTest {
+        WritePerson.throws = true
+        val arc = allocator.startArcForPlan(PersonPlan)
+
+        val error = assertSuspendingThrows(Arc.ArcErrorException::class) {
+            arc.waitForStart()
+        }
+        // TODO(b//160933123): the containing exception is somehow "duplicated",
+        //                     so the real cause is a second level down
+        val cause = error.cause!!.cause
+        when (cause) {
+            // For CoreAllocatorTest
+            is IllegalArgumentException -> assertThat(cause.message).isEqualTo("Boom!")
+            // For AndroidAllocatorTest
+            is DeserializedException ->
+                assertThat(cause.message).isEqualTo("java.lang.IllegalArgumentException: Boom!")
+            else -> fail("Expected IllegalArgumentException or DeserializedException; got $cause")
+        }
     }
 }

@@ -27,9 +27,9 @@ import arcs.core.data.RawEntity
 import arcs.core.data.RawEntity.Companion.UNINITIALIZED_TIMESTAMP
 import arcs.core.data.Schema
 import arcs.core.data.SchemaFields
+import arcs.core.data.SchemaRegistry
 import arcs.core.data.util.ReferencablePrimitive
 import arcs.core.data.util.toReferencable
-import arcs.core.entity.SchemaRegistry
 import arcs.core.storage.Reference
 import arcs.core.storage.StorageKey
 import arcs.core.storage.StorageKeyParser
@@ -87,12 +87,12 @@ class DatabaseImplTest {
 
     @Test
     fun getTypeId_entity_throwsWhenMissing() = runBlockingTest {
-        val exception = assertSuspendingThrows(IllegalArgumentException::class) {
+        val exception = assertSuspendingThrows(NoSuchElementException::class) {
             database.getTypeIdForTest(FieldType.EntityRef("shouldnotexistanywhere"))
         }
-        assertThat(exception)
-            .hasMessageThat()
-            .contains("Unknown Schema with hash:")
+        assertThat(exception).hasMessageThat().isEqualTo(
+            "Schema hash 'shouldnotexistanywhere' not found in SchemaRegistry."
+        )
     }
 
     @Test
@@ -152,9 +152,9 @@ class DatabaseImplTest {
         // Creates new IDs for each field.
         val fields1 = database.getSchemaFields(schemaTypeId1, db)
         assertThat(fields1).containsExactly(
-            "text", DatabaseImpl.SchemaField("text", 1L, TEXT_TYPE_ID, isCollection = FieldClass.Singleton),
-            "bool", DatabaseImpl.SchemaField("bool", 2L, BOOLEAN_TYPE_ID, isCollection = FieldClass.Singleton),
-            "num", DatabaseImpl.SchemaField("num", 3L, NUMBER_TYPE_ID, isCollection = FieldClass.Collection)
+            "text", DatabaseImpl.SchemaField("text", 1L, TEXT_TYPE_ID, FieldClass.Singleton),
+            "bool", DatabaseImpl.SchemaField("bool", 2L, BOOLEAN_TYPE_ID, FieldClass.Singleton),
+            "num", DatabaseImpl.SchemaField("num", 3L, NUMBER_TYPE_ID, FieldClass.Collection)
         )
 
         // Re-running with the same schema doesn't create new field IDs
@@ -165,9 +165,9 @@ class DatabaseImplTest {
         val schemaTypeId2 = database.getSchemaTypeId(schema2, db)
         val fields2 = database.getSchemaFields(schemaTypeId2, db)
         assertThat(fields2).containsExactly(
-            "text", DatabaseImpl.SchemaField("text", 4L, TEXT_TYPE_ID, isCollection = FieldClass.Singleton),
-            "bool", DatabaseImpl.SchemaField("bool", 5L, BOOLEAN_TYPE_ID, isCollection = FieldClass.Singleton),
-            "num", DatabaseImpl.SchemaField("num", 6L, NUMBER_TYPE_ID, isCollection = FieldClass.Collection)
+            "text", DatabaseImpl.SchemaField("text", 4L, TEXT_TYPE_ID, FieldClass.Singleton),
+            "bool", DatabaseImpl.SchemaField("bool", 5L, BOOLEAN_TYPE_ID, FieldClass.Singleton),
+            "num", DatabaseImpl.SchemaField("num", 6L, NUMBER_TYPE_ID, FieldClass.Collection)
         )
     }
 
@@ -402,8 +402,64 @@ class DatabaseImplTest {
     }
 
     @Test
+    fun insertAndGet_entity_newEntityWithEmptyLists() = runBlockingTest {
+        val key = DummyStorageKey("key")
+
+        val schema = newSchema(
+            "hash",
+            SchemaFields(
+                singletons = mapOf(
+                    "textlist" to FieldType.ListOf(FieldType.Text),
+                    "longlist" to FieldType.ListOf(FieldType.Long),
+                    "nulltextlist" to FieldType.ListOf(FieldType.Text),
+                    "nulllonglist" to FieldType.ListOf(FieldType.Long)
+                ),
+                collections = emptyMap()
+            )
+        )
+
+        val entity = DatabaseData.Entity(
+            RawEntity(
+                "entity",
+                mapOf(
+                    "textlist" to
+                        emptyList<ReferencablePrimitive<String>>()
+                            .toReferencable(FieldType.ListOf(FieldType.Text)),
+                    "longlist" to
+                        emptyList<ReferencablePrimitive<Long>>()
+                            .toReferencable(FieldType.ListOf(FieldType.Long)),
+                    "nulltextlist" to null,
+                    "nulllonglist" to null
+                ),
+                emptyMap()
+            ),
+            schema,
+            FIRST_VERSION_NUMBER,
+            VERSION_MAP
+        )
+
+        database.insertOrUpdateEntity(key, entity)
+        val entityOut = database.getEntity(key, schema)
+        assertThat(entityOut).isEqualTo(entity)
+    }
+
+    @Test
     fun insertAndGet_entity_newEntityWithPrimitiveFields() = runBlockingTest {
         val key = DummyStorageKey("key")
+
+        newSchema(
+            "inlineHash",
+            SchemaFields(
+                singletons = mapOf(
+                    "inlineText" to FieldType.Text,
+                    "inlineNumber" to FieldType.Number
+                ),
+                collections = mapOf(
+                    "inlineTextCollection" to FieldType.Text
+                )
+            )
+        )
+
         val schema = newSchema(
             "hash",
             SchemaFields(
@@ -420,7 +476,9 @@ class DatabaseImplTest {
                     "double" to FieldType.Double,
                     "txtlst" to FieldType.ListOf(FieldType.Text),
                     "lnglst" to FieldType.ListOf(FieldType.Long),
-                    "bigint" to FieldType.BigInt
+                    "bigint" to FieldType.BigInt,
+                    "inlined" to FieldType.InlineEntity("inlineHash"),
+                    "inlinelist" to FieldType.ListOf(FieldType.InlineEntity("inlineHash"))
                 ),
                 collections = mapOf(
                     "texts" to FieldType.Text,
@@ -433,10 +491,25 @@ class DatabaseImplTest {
                     "chars" to FieldType.Char,
                     "floats" to FieldType.Float,
                     "doubles" to FieldType.Double,
-                    "bigints" to FieldType.BigInt
+                    "bigints" to FieldType.BigInt,
+                    "inlines" to FieldType.InlineEntity("inlineHash")
                 )
             )
         )
+
+        fun toInlineEntity(text: String, number: Double, collection: Set<String>) = RawEntity(
+            "",
+            mapOf(
+                "inlineText" to text.toReferencable(),
+                "inlineNumber" to number.toReferencable()
+            ),
+            mapOf(
+                "inlineTextCollection" to collection.map { it.toReferencable() }.toSet()
+            )
+        )
+
+        val inlineEntity = toInlineEntity("inlineABC", 131313.0, setOf("A", "B"))
+
         val entity = DatabaseData.Entity(
             RawEntity(
                 "entity",
@@ -448,26 +521,48 @@ class DatabaseImplTest {
                     "short" to 382.toShort().toReferencable(),
                     "int" to 1000000000.toReferencable(),
                     // This number is not representable as a double
-                    "long" to  1000000000000000001L.toReferencable(),
+                    "long" to 1000000000000000001L.toReferencable(),
                     "char" to 'A'.toReferencable(),
                     "float" to 34.567f.toReferencable(),
                     "double" to 4e100.toReferencable(),
-                    "txtlst" to listOf("this", "is", "a", "list").map { it.toReferencable() }.toReferencable(FieldType.ListOf(FieldType.Text)),
-                    "lnglst" to listOf(1L, 2L, 4L, 4L, 3L).map { it.toReferencable() }.toReferencable(FieldType.ListOf(FieldType.Long)),
-                    "bigint" to BigInteger.valueOf(123).toReferencable()
+                    "txtlst" to listOf("this", "is", "a", "list").map {
+                        it.toReferencable()
+                    }.toReferencable(FieldType.ListOf(FieldType.Text)),
+                    "lnglst" to listOf(1L, 2L, 4L, 4L, 3L).map {
+                        it.toReferencable()
+                    }.toReferencable(FieldType.ListOf(FieldType.Long)),
+                    "bigint" to BigInteger.valueOf(123).toReferencable(),
+                    "inlined" to inlineEntity,
+                    "inlinelist" to listOf(
+                        toInlineEntity("inlist", 3.0, setOf("A", "Z")),
+                        toInlineEntity("alsoinlist", 4.0, setOf("B", "Z"))
+                    ).toReferencable(FieldType.ListOf(FieldType.InlineEntity("inlineHash")))
                 ),
                 mapOf(
                     "texts" to setOf("abc".toReferencable(), "def".toReferencable()),
                     "bools" to setOf(true.toReferencable(), false.toReferencable()),
                     "nums" to setOf(123.0.toReferencable(), 456.0.toReferencable()),
                     "bytes" to setOf(100.toByte().toReferencable(), 27.toByte().toReferencable()),
-                    "shorts" to setOf(129.toShort().toReferencable(), 30000.toShort().toReferencable()),
+                    "shorts" to setOf(
+                        129.toShort().toReferencable(),
+                        30000.toShort().toReferencable()
+                    ),
                     "ints" to setOf(1000000000.toReferencable(), 28.toReferencable()),
-                    "longs" to setOf(1000000000000000002L.toReferencable(), 1000000000000000003L.toReferencable()),
+                    "longs" to setOf(
+                        1000000000000000002L.toReferencable(),
+                        1000000000000000003L.toReferencable()
+                    ),
                     "chars" to listOf('a', 'r', 'c', 's').map { it.toReferencable() }.toSet(),
                     "floats" to setOf(1.1f.toReferencable(), 100.101f.toReferencable()),
                     "doubles" to setOf(1.0.toReferencable(), 2e80.toReferencable()),
-                    "bigints" to setOf(BigInteger.valueOf(123).toReferencable(), BigInteger.valueOf(678).toReferencable())
+                    "bigints" to setOf(
+                        BigInteger.valueOf(123).toReferencable(),
+                        BigInteger.valueOf(678).toReferencable()
+                    ),
+                    "inlines" to setOf(
+                        toInlineEntity("inline1", 1.0, setOf("Q", "E", "D")),
+                        toInlineEntity("inline2", 2.0, setOf("R", "F", "E"))
+                    )
                 )
             ),
             schema,
@@ -477,7 +572,6 @@ class DatabaseImplTest {
 
         database.insertOrUpdateEntity(key, entity)
         val entityOut = database.getEntity(key, schema)
-
         assertThat(entityOut).isEqualTo(entity)
     }
 
@@ -575,6 +669,16 @@ class DatabaseImplTest {
         val key = DummyStorageKey("key")
         val childSchema = newSchema("child")
         database.getSchemaTypeId(childSchema, db)
+        newSchema(
+            "inlineHash",
+            SchemaFields(
+                singletons = mapOf(
+                    "text" to FieldType.Text,
+                    "num" to FieldType.Number
+                ),
+                collections = emptyMap()
+            )
+        )
         val schema = newSchema(
             "hash",
             SchemaFields(
@@ -582,16 +686,33 @@ class DatabaseImplTest {
                     "text" to FieldType.Text,
                     "bool" to FieldType.Boolean,
                     "num" to FieldType.Number,
-                    "ref" to FieldType.EntityRef("child")
+                    "ref" to FieldType.EntityRef("child"),
+                    "inline" to FieldType.InlineEntity("inlineHash"),
+                    "inlinelist" to FieldType.ListOf(FieldType.InlineEntity("inlineHash"))
                 ),
                 collections = mapOf(
                     "texts" to FieldType.Text,
                     "bools" to FieldType.Boolean,
                     "nums" to FieldType.Number,
-                    "refs" to FieldType.EntityRef("child")
+                    "refs" to FieldType.EntityRef("child"),
+                    "inlines" to FieldType.InlineEntity("inlineHash")
                 )
             )
         )
+
+        fun toInlineEntity(text: String, num: Double) = RawEntity(
+            "",
+            singletons = mapOf(
+                "text" to text.toReferencable(),
+                "num" to num.toReferencable()
+            )
+        )
+
+        val inlineEntity = toInlineEntity("qqq", 555.0)
+        val inline1 = toInlineEntity("rrr", 666.0)
+        val inline2 = toInlineEntity("sss", 777.0)
+        val inline3 = toInlineEntity("ttt", 888.0)
+
         val entityId = "entity"
         val entity1 = DatabaseData.Entity(
             RawEntity(
@@ -604,7 +725,12 @@ class DatabaseImplTest {
                         "child-id-1",
                         DummyStorageKey("child-ref-1"),
                         VersionMap("child-1" to 1)
-                    )
+                    ),
+                    "inline" to inlineEntity,
+                    "inlinelist" to listOf(
+                        toInlineEntity("list1", 1.0),
+                        toInlineEntity("list2", 2.0)
+                    ).toReferencable(FieldType.ListOf(FieldType.InlineEntity("inlineHash")))
                 ),
                 mapOf(
                     "texts" to setOf("aaa".toReferencable(), "bbb".toReferencable()),
@@ -621,12 +747,20 @@ class DatabaseImplTest {
                             DummyStorageKey("child-ref-3"),
                             VersionMap("child-3" to 3)
                         )
-                    )
+                    ),
+                    "inlines" to setOf(inline1, inline2)
                 )
             ),
             schema,
             1,
             VersionMap("actor" to 1)
+        )
+        val inlineEntity2 = RawEntity(
+            "",
+            singletons = mapOf(
+                "text" to "rrr".toReferencable(),
+                "num" to 666.0.toReferencable()
+            )
         )
         val entity2 = DatabaseData.Entity(
             RawEntity(
@@ -639,7 +773,12 @@ class DatabaseImplTest {
                         "child-id-9",
                         DummyStorageKey("child-ref-9"),
                         VersionMap("child-9" to 9)
-                    )
+                    ),
+                    "inline" to inlineEntity2,
+                    "inlinelist" to listOf(
+                        toInlineEntity("list1", 1.0),
+                        toInlineEntity("list1", 1.0)
+                    ).toReferencable(FieldType.ListOf(FieldType.InlineEntity("inlineHash")))
                 ),
                 mapOf(
                     "texts" to setOf("zzz".toReferencable(), "yyy".toReferencable()),
@@ -656,7 +795,8 @@ class DatabaseImplTest {
                             DummyStorageKey("child-ref-7"),
                             VersionMap("child-7" to 7)
                         )
-                    )
+                    ),
+                    "inlines" to setOf(inline2, inline3)
                 )
             ),
             schema,
@@ -924,7 +1064,7 @@ class DatabaseImplTest {
         // Test addition of new elements.
         values.add(ReferenceWithVersion(
             Reference("new-ref", backingKey, VersionMap("new-ref" to 3)),
-            VersionMap( "actor" to 3)
+            VersionMap("actor" to 3)
         ))
         val inputCollection3 = inputCollection2.copy(values = values, databaseVersion = 3)
         database.insertOrUpdate(collectionKey, inputCollection3)
@@ -1293,7 +1433,7 @@ class DatabaseImplTest {
                 "entity1",
                 mapOf("text" to "abc".toReferencable()),
                 mapOf("nums" to setOf(123.0.toReferencable(), 456.0.toReferencable())),
-                1L, //Creation time
+                1L, // Creation time
                 12L
             ),
             schema,
@@ -1305,7 +1445,7 @@ class DatabaseImplTest {
                 "entity2",
                 mapOf("text" to "def".toReferencable()),
                 mapOf("nums" to setOf(123.0.toReferencable(), 789.0.toReferencable())),
-                3L, //Creation time
+                3L, // Creation time
                 12L
             ),
             schema,
@@ -1317,7 +1457,7 @@ class DatabaseImplTest {
                 "entity3",
                 mapOf("text" to "ghi".toReferencable()),
                 mapOf("nums" to setOf(111.0.toReferencable(), 789.0.toReferencable())),
-                5L, //Creation time
+                5L, // Creation time
                 12L
             ),
             schema,
@@ -1392,14 +1532,16 @@ class DatabaseImplTest {
                 id,
                 singletons = mapOf(),
                 collections = mapOf(),
-                creationTimestamp = JvmTime.currentTimeMillis - Duration.ofDays(creationDaysAgo).toMillis()
+                creationTimestamp = JvmTime.currentTimeMillis -
+                    Duration.ofDays(creationDaysAgo).toMillis()
             ),
             schema,
             FIRST_VERSION_NUMBER,
             VERSION_MAP
         )
+
         suspend fun updateCollection(vararg entities: DatabaseData.Entity) {
-            val values = entities.map { 
+            val values = entities.map {
                 ReferenceWithVersion(
                     Reference(it.rawEntity.id, backingKey, VersionMap("ref" to 1)),
                     VersionMap("actor" to 1))
@@ -1491,11 +1633,14 @@ class DatabaseImplTest {
             FIRST_VERSION_NUMBER,
             VERSION_MAP
         )
+
         suspend fun updateCollection(vararg entities: DatabaseData.Entity) {
-            val values = entities.map { ReferenceWithVersion(
-                Reference(it.rawEntity.id, backingKey, VersionMap("ref" to 1)),
-                VersionMap("actor" to 1)
-            ) }
+            val values = entities.map {
+                ReferenceWithVersion(
+                    Reference(it.rawEntity.id, backingKey, VersionMap("ref" to 1)),
+                    VersionMap("actor" to 1)
+                )
+            }
             val collection = DatabaseData.Collection(
                 values = values.toSet(),
                 schema = schema,
@@ -1566,11 +1711,14 @@ class DatabaseImplTest {
             FIRST_VERSION_NUMBER,
             VERSION_MAP
         )
+
         suspend fun updateSingleton(entity: DatabaseData.Entity?) {
-            val ref = entity?.let{ReferenceWithVersion(
-                Reference(it.rawEntity.id, backingKey, VersionMap("ref" to 1)),
-                VersionMap("actor" to 1)
-            )}
+            val ref = entity?.let {
+                ReferenceWithVersion(
+                    Reference(it.rawEntity.id, backingKey, VersionMap("ref" to 1)),
+                    VersionMap("actor" to 1)
+                )
+            }
             val singleton = DatabaseData.Singleton(
                 value = ref,
                 schema = schema,
@@ -1640,13 +1788,18 @@ class DatabaseImplTest {
                     "text" to "abc".toReferencable(),
                     "long" to 1000000000000000001L.toReferencable(),
                     "float" to 3.412f.toReferencable(),
-                    "textlist" to listOf("abc", "abcd", "def", "ghi").map { it.toReferencable() }.toReferencable(FieldType.ListOf(FieldType.Text)),
+                    "textlist" to listOf("abc", "abcd", "def", "ghi").map {
+                        it.toReferencable()
+                    }.toReferencable(FieldType.ListOf(FieldType.Text)),
                     "bigint" to BigInteger.valueOf(1000).toReferencable()
                 ),
                 mapOf(
                     "nums" to setOf(123.0.toReferencable(), 456.0.toReferencable()),
                     "chars" to listOf('A', 'R', 'C', 'S', '!').map { it.toReferencable() }.toSet(),
-                    "bigints" to setOf(BigInteger("12345678901234567890").toReferencable(), BigInteger.valueOf(3).toReferencable())
+                    "bigints" to setOf(
+                        BigInteger("12345678901234567890").toReferencable(),
+                        BigInteger.valueOf(3).toReferencable()
+                    )
                 ),
                 11L,
                 timeInPast // expirationTimestamp, in the past.
@@ -1663,13 +1816,18 @@ class DatabaseImplTest {
                     "text" to "def".toReferencable(),
                     "long" to 1L.toReferencable(),
                     "float" to 42.0f.toReferencable(),
-                    "textlist" to listOf("abcd", "abcd").map { it.toReferencable() }.toReferencable(FieldType.ListOf(FieldType.Text)),
+                    "textlist" to listOf("abcd", "abcd").map {
+                        it.toReferencable()
+                    }.toReferencable(FieldType.ListOf(FieldType.Text)),
                     "bigint" to BigInteger.valueOf(2000).toReferencable()
                 ),
                 mapOf(
                     "nums" to setOf(123.0.toReferencable(), 789.0.toReferencable()),
                     "chars" to listOf('R', 'O', 'C', 'K', 'S').map { it.toReferencable() }.toSet(),
-                    "bigints" to setOf(BigInteger("44412345678901234567890").toReferencable(), BigInteger.valueOf(5).toReferencable())
+                    "bigints" to setOf(
+                        BigInteger("44412345678901234567890").toReferencable(),
+                        BigInteger.valueOf(5).toReferencable()
+                    )
                 ),
                 11L,
                 JvmTime.currentTimeMillis + 10000 // expirationTimestamp, in the future.
@@ -1686,13 +1844,18 @@ class DatabaseImplTest {
                     "text" to "def".toReferencable(),
                     "long" to 10L.toReferencable(),
                     "float" to 37.5f.toReferencable(),
-                    "textlist" to listOf("def", "def").map { it.toReferencable() }.toReferencable(FieldType.ListOf(FieldType.Text)),
+                    "textlist" to listOf("def", "def").map {
+                        it.toReferencable()
+                    }.toReferencable(FieldType.ListOf(FieldType.Text)),
                     "bigint" to BigInteger.valueOf(3000).toReferencable()
                 ),
                 mapOf(
                     "nums" to setOf(123.0.toReferencable(), 789.0.toReferencable()),
                     "chars" to listOf('H', 'e', 'l', 'L', 'o').map { it.toReferencable() }.toSet(),
-                    "bigints" to setOf(BigInteger("33344412345678901234567890").toReferencable(), BigInteger.valueOf(7).toReferencable())
+                    "bigints" to setOf(
+                        BigInteger("33344412345678901234567890").toReferencable(),
+                        BigInteger.valueOf(7).toReferencable()
+                    )
                 ),
                 11L,
                 UNINITIALIZED_TIMESTAMP // no expirationTimestamp
@@ -1783,7 +1946,7 @@ class DatabaseImplTest {
         assertTableIsSize("field_values", 16)
 
         // Check collection entries have been cleared. For each remaining entity there should only
-        // be twelve values (two for the nums collection, five for the chars collection, 
+        // be twelve values (two for the nums collection, five for the chars collection,
         // two for the text list, two for the bigint list, one for the membership of the entity).
         assertTableIsSize("collection_entries", 24)
 
@@ -1806,7 +1969,7 @@ class DatabaseImplTest {
             "33344412345678901234567890",
             "7"
         )
-        
+
         assertThat(readNumberPrimitiveValues()).containsExactly(123.0, 789.0, 42.0, 37.5)
 
         // Check the corrent clients were notified.
@@ -1819,6 +1982,193 @@ class DatabaseImplTest {
         entityClient.eventMutex.withLock {
             assertThat(entityClient.deletes).isEmpty()
         }
+    }
+
+    @Test
+    fun removeExpiredEntities_inlineDataIsRemoved() = runBlockingTest {
+        newSchema(
+            "inlineInlineHash",
+            SchemaFields(
+                singletons = mapOf(
+                    "text" to FieldType.Text
+                ),
+                collections = emptyMap()
+            )
+        )
+        newSchema(
+            "inlineHash",
+            SchemaFields(
+                singletons = mapOf(
+                    "text" to FieldType.Text,
+                    "textlist" to FieldType.ListOf(FieldType.Text),
+                    "inline" to FieldType.InlineEntity("inlineInlineHash"),
+                    "inlinelist" to FieldType.ListOf(FieldType.InlineEntity("inlineInlineHash"))
+                ),
+                collections = mapOf(
+                    "texts" to FieldType.Text,
+                    "inlines" to FieldType.InlineEntity("inlineInlineHash")
+                )
+            )
+        )
+        val schema = newSchema(
+            "hash",
+            SchemaFields(
+                singletons = mapOf(
+                    "inline" to FieldType.InlineEntity("inlineHash"),
+                    "inlinelist" to FieldType.ListOf(FieldType.InlineEntity("inlineHash"))
+                ),
+                collections = mapOf(
+                    "inlines" to FieldType.InlineEntity("inlineHash")
+                )
+            )
+        )
+        val entityKey = DummyStorageKey("backing/entity")
+
+        fun toInlineEntity(
+            text: String,
+            textList: List<String>,
+            textSet: Set<String>,
+            inline: RawEntity,
+            inlineSet: Set<RawEntity>,
+            inlineList: List<RawEntity>
+        ) = RawEntity(
+            "",
+            mapOf(
+                "text" to text.toReferencable(),
+                "textlist" to textList.map { it.toReferencable() }
+                    .toReferencable(FieldType.ListOf(FieldType.Text)),
+                "inline" to inline,
+                "inlinelist" to inlineList
+                    .toReferencable(FieldType.ListOf(FieldType.InlineEntity("inlineInlineHash")))
+            ),
+            mapOf(
+                "texts" to textSet.map { it.toReferencable() }.toSet(),
+                "inlines" to inlineSet
+            )
+        )
+
+        fun toInlineInlineEntity(text: String) = RawEntity(
+            "",
+            mapOf("text" to text.toReferencable()),
+            emptyMap()
+        )
+
+        val inlineEntity1 = toInlineEntity(
+            "inline1",
+            listOf("L", "M", "N"),
+            setOf("A", "B", "C"),
+            toInlineInlineEntity("SO INLINE"),
+            setOf(
+                toInlineInlineEntity("MORE INLINE"),
+                toInlineInlineEntity("VERY INLINE")
+            ),
+            listOf(
+                toInlineInlineEntity("LIST INLINE"),
+                toInlineInlineEntity("LIST INLINE")
+            )
+        )
+        val inlineEntity2 = toInlineEntity(
+            "inline2",
+            listOf("O", "P", "Q"),
+            setOf("D", "E", "F"),
+            toInlineInlineEntity("SUCH INLINE"),
+            setOf(
+                toInlineInlineEntity("MANY INLINE"),
+                toInlineInlineEntity("VORACIOUSLY INLINE")
+            ),
+            listOf(
+                toInlineInlineEntity("LOTS INLINE"),
+                toInlineInlineEntity("LIST INLINE")
+            )
+        )
+        val inlineEntity3 = toInlineEntity(
+            "inline3",
+            listOf("R", "S", "T"),
+            setOf("G", "H", "I"),
+            toInlineInlineEntity("SUSPICIOUSLY INLINE"),
+            setOf(
+                toInlineInlineEntity("MUST INLINE"),
+                toInlineInlineEntity("VALUABLE INLINE")
+            ),
+            listOf(
+                toInlineInlineEntity("LOADED INLINE"),
+                toInlineInlineEntity("LIST INLINE")
+            )
+        )
+        val inlineEntity4 = toInlineEntity(
+            "inline4",
+            listOf("U", "V", "V"),
+            setOf("J", "K", "L"),
+            toInlineInlineEntity("SORTA INLINE"),
+            setOf(
+                toInlineInlineEntity("MAYBE INLINE"),
+                toInlineInlineEntity("VALIDLY INLINE")
+            ),
+            listOf(
+                toInlineInlineEntity("LOOSELY INLINE"),
+                toInlineInlineEntity("LIST INLINE")
+            )
+        )
+
+        val timeInPast = JvmTime.currentTimeMillis - 10000 // expirationTimestamp, in the past.
+
+        val entity = DatabaseData.Entity(
+            RawEntity(
+                "entity",
+                mapOf(
+                    "inline" to inlineEntity1,
+                    "inlinelist" to listOf(inlineEntity3, inlineEntity4)
+                        .toReferencable(FieldType.ListOf(FieldType.InlineEntity("inlineSchema")))
+                ),
+                mapOf(
+                    "inlines" to setOf(inlineEntity2, inlineEntity3)
+                ),
+                11L,
+                timeInPast
+            ),
+            schema,
+            FIRST_VERSION_NUMBER,
+            VERSION_MAP
+        )
+
+        database.insertOrUpdate(entityKey, entity)
+        assertThat(database.getEntity(entityKey, schema)).isEqualTo(entity)
+
+        database.removeExpiredEntities()
+
+        // Check the expired entity fields have been cleared (only a tombstone is left).
+        assertThat(database.getEntity(entityKey, schema))
+            .isEqualTo(DatabaseData.Entity(
+                RawEntity(
+                    "entity",
+                    mapOf(
+                        "inline" to null,
+                        "inlinelist" to null
+                    ),
+                    mapOf(
+                        "inlines" to emptySet()
+                    ),
+                    11L,
+                    timeInPast
+                ),
+                schema,
+                FIRST_VERSION_NUMBER,
+                VERSION_MAP
+            ))
+
+        // Check unused values have been deleted from the global table as well, there should be no
+        // values left.
+        assertTableIsSize("field_values", 0)
+
+        // Check collection entries have been cleared.
+        assertTableIsSize("collection_entries", 0)
+
+        // Check the collections for chars/nums are gone.
+        assertTableIsSize("collections", 0)
+
+        assertTableIsSize("entities", 1)
+
+        assertTableIsSize("text_primitive_values", 0)
     }
 
     @Test
@@ -1927,7 +2277,7 @@ class DatabaseImplTest {
                 Reference("entity", backingKey, VersionMap("ref" to 1)),
                 VersionMap("actor" to 2)
             ),
-            databaseVersion = FIRST_VERSION_NUMBER+1
+            databaseVersion = FIRST_VERSION_NUMBER + 1
         )
         database.insertOrUpdate(singletonKey, singleton)
 
@@ -2399,7 +2749,8 @@ class DatabaseImplTest {
             .toSet()
 
     private fun readNumberPrimitiveValues(): Set<Double> =
-        database.readableDatabase.rawQuery("SELECT value FROM number_primitive_values", emptyArray())
+        database.readableDatabase
+            .rawQuery("SELECT value FROM number_primitive_values", emptyArray())
             .map { it.getDouble(0) }
             .toSet()
 
@@ -2410,9 +2761,9 @@ class DatabaseImplTest {
 
     private fun assertTableIsSize(tableName: String, size: Int) {
         database.readableDatabase.rawQuery("SELECT * FROM $tableName", arrayOf()).use {
-            assertWithMessage("Expected table $tableName to be of size ${size}, but found ${it.count} rows.")
-                .that(it.count)
-                .isEqualTo(size)
+            assertWithMessage(
+                "Expected table $tableName to be of size $size, but found ${it.count} rows."
+            ).that(it.count).isEqualTo(size)
         }
     }
 

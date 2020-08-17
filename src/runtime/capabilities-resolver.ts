@@ -10,10 +10,10 @@
 
 import {assert} from '../platform/assert-web.js';
 import {Dictionary} from './hot.js';
-import {StorageKey} from './storageNG/storage-key.js';
+import {StorageKey} from './storage/storage-key.js';
 import {Type} from './type.js';
 import {Capabilities} from './capabilities.js';
-import {ReferenceModeStorageKey} from './storageNG/reference-mode-storage-key.js';
+import {ReferenceModeStorageKey} from './storage/reference-mode-storage-key.js';
 import {Flags} from './flags.js';
 import {StorageKeyFactory, FactorySelector, ContainerStorageKeyOptions, BackingStorageKeyOptions, SimpleCapabilitiesSelector} from './storage-key-factory.js';
 import {ArcId} from './id.js';
@@ -44,15 +44,18 @@ export class CapabilitiesResolver {
   get selector() { return this.options.selector || CapabilitiesResolver.defaultSelector; }
 
   async createStorageKey(capabilities: Capabilities, type: Type, handleId: string): Promise<StorageKey> {
+    const factory = this.selectStorageKeyFactory(capabilities, handleId);
+    return this.createStorageKeyWithFactory(factory, type, handleId);
+  }
+
+  selectStorageKeyFactory(capabilities: Capabilities, handleId: string): StorageKeyFactory {
     const selectedFactories = Object.values(this.factories).filter(factory => {
-        return factory.supports(capabilities);
-      }
-    );
+      return factory.supports(capabilities);
+    });
     if (selectedFactories.length === 0) {
       throw new Error(`Cannot create a suitable storage key for handle '${handleId}' with capabilities ${capabilities.toDebugString()}`);
     }
-    const factory = this.selector.select(selectedFactories);
-    return this.createStorageKeyWithFactory(factory, type, handleId);
+    return this.selector.select(selectedFactories);
   }
 
   private async createStorageKeyWithFactory(factory: StorageKeyFactory, type: Type, handleId: string): Promise<StorageKey> {

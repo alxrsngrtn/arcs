@@ -36,24 +36,16 @@ message HandleProto {
     JOIN = 5;
   }
 
-  // Next Id: 4
-  enum Capability {
-    PERSISTENT = 0;
-    TIED_TO_RUNTIME = 1;
-    TIED_TO_ARC = 2;
-    QUERYABLE = 3;
-  }
-
   // Identifies a handle in a recipe.
   string name = 1;
   string id = 2;
   Fate fate = 3;
   repeated string tags = 4;
   TypeProto type = 5;
-  repeated Capability capabilities = 6;
   string storage_key = 7;
   // Only present for fate = JOIN handles.
   repeated string associated_handles = 8;
+  repeated AnnotationProto annotations = 9;
 }
 
 // A single particle instance in a recipe.
@@ -69,6 +61,8 @@ message HandleConnectionProto {
   string name = 1;
   // Refers to envelope.recipe.handles.name
   string handle = 2;
+  // The type of the handle connection instance.
+  TypeProto type = 3;
 }
 
 // Defines a particle contract and links it with implementation.
@@ -83,6 +77,9 @@ message ParticleSpecProto {
   repeated ClaimProto claims = 4;
   // Conjunction of all checks.
   repeated CheckProto checks = 5;
+  repeated AnnotationProto annotations = 7;
+
+  reserved 6;
 }
 
 // Defines a single connection of a particle spec.
@@ -97,6 +94,7 @@ message HandleConnectionSpecProto {
   string name = 1;
   Direction direction = 2;
   TypeProto type = 3;
+  string expression = 4;
 }
 
 // Representation of a type in Arcs.
@@ -110,6 +108,7 @@ message TypeProto {
     TypeVariableProto variable = 6;
     SingletonTypeProto singleton = 7;
     CountTypeProto count = 8;
+    ListTypeProto list = 9;
   }
   bool optional = 10;
   RefinementExpressionProto refinement = 11;
@@ -119,10 +118,21 @@ enum PrimitiveTypeProto {
   TEXT = 0;
   NUMBER = 1;
   BOOLEAN = 2;
+  BIGINT = 3;
+  BYTE = 4;
+  SHORT = 5;
+  INT = 6;
+  LONG = 7;
+  CHAR = 8;
+  FLOAT = 9;
+  DOUBLE = 10;
 }
 
 message EntityTypeProto {
   SchemaProto schema = 1;
+
+  // Whether the EntityType is inlined or not.
+  bool inline = 2;
 }
 
 message CollectionTypeProto {
@@ -148,16 +158,31 @@ message TypeVariableProto {
   ConstraintInfo constraint = 2;
 }
 
+message ListTypeProto {
+  TypeProto element_type = 1;
+}
+
 // These are constraints expressed by the particle author,
 // not those resulting from type inference.
 message ConstraintInfo {
   TypeProto constraint_type = 1;
+
+  // If `true`, the particle instance in a recipe has access to all the fields
+  // present in the resolved type (`with {*}`). Otherwise, the particle instance
+  // can only access the fields present in `constraint_type`. `max_access` is an
+  // orthogonal concept to the `constraint_type`. One might specify explicit
+  // fields in the constraint, for example `with {foo: Text, *}`, in order to
+  // add checks and claims to manifests or to allow handles access in particles
+  // without reflection.
+  bool max_access = 2;
 }
 
 message SchemaProto {
   repeated string names = 1;
   map<string, TypeProto> fields = 2;
   string hash = 3;
+  string refinement = 4;
+  string query = 5;
 }
 
 enum OPERATOR {
@@ -212,16 +237,25 @@ message UnaryExpressionProto {
 // a `HandleConnectionSpec`. This should be sufficient as the root of an access
 // path in a claim or check can only refer to a `HandleConnectionSpec`.
 message AccessPathProto {
+  message HandleRoot {
+    // (particle_spec, handle_connection) identifies a `HandleConnectionSpec`.
+    string particle_spec = 1;
+    string handle_connection = 2;
+  }
+  oneof root {
+    HandleRoot handle = 4;
+    string store_id = 5;
+  }
+
   message Selector {
     oneof selector {
       string field = 1;
       // TODO(bgogul): Other selectors like dereferencing, index, etc.
     }
   }
-  // (particle_spec, handle_connection) identifies a `HandleConnectionSpec`.
-  string particle_spec = 1;
-  string handle_connection = 2;
   repeated Selector selectors = 3;
+
+  reserved 1, 2;
 }
 
 message InformationFlowLabelProto {
@@ -276,4 +310,16 @@ message ClaimProto {
 message CheckProto {
   AccessPathProto access_path = 1;
   InformationFlowLabelProto.Predicate predicate = 2;
+}
+
+message PolicyConstraintsProto {
+  PolicyProto policy = 1;
+
+  InformationFlowLabelProto.Predicate egress_check = 2;
+
+  message StoreConstraints {
+    string store_id = 1;
+    repeated ClaimProto claims = 2;
+  }
+  repeated StoreConstraints store_constraints = 3;
 }

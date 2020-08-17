@@ -13,7 +13,9 @@ package arcs.core.allocator
 import arcs.core.common.ArcId
 import arcs.core.common.Id
 import arcs.core.common.toArcId
-import arcs.core.data.CreateableStorageKey
+import arcs.core.data.Annotation
+import arcs.core.data.Capabilities
+import arcs.core.data.CreatableStorageKey
 import arcs.core.data.Plan
 import arcs.core.entity.HandleSpec
 import arcs.core.host.ArcHost
@@ -28,7 +30,11 @@ import arcs.core.type.Type
 import arcs.core.util.TaggedLog
 import arcs.core.util.plus
 import arcs.core.util.traverse
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * An [Allocator] is responsible for starting and stopping arcs via a distributed
@@ -42,9 +48,11 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 class Allocator(
     private val hostRegistry: HostRegistry,
     /** Currently active Arcs and their associated [Plan.Partition]s. */
-    private val partitionMap: PartitionSerialization
+    private val partitionMap: PartitionSerialization,
+    private val coroutineContext: CoroutineContext = Dispatchers.Default
 ) {
     private val log = TaggedLog { "Allocator" }
+    private val mutex = Mutex()
 
     /**
      * A [PartitionSerialization] is an interface for storing the [Plan.Partition] items created when an
@@ -80,11 +88,12 @@ class Allocator(
     /**
      * Start a new Arc given a [Plan] and return an [Arc].
      */
-    private suspend fun startArcForPlan(plan: Plan, nameForTesting: String): Arc {
+    private suspend fun startArcForPlan(plan: Plan, nameForTesting: String): Arc = mutex.withLock {
+        plan.registerSchemas()
         plan.arcId?.toArcId()?.let { arcId ->
             val existingPartitions = partitionMap.readPartitions(arcId)
             if (existingPartitions.isNotEmpty()) {
-                return Arc(arcId, this, existingPartitions)
+                return Arc(arcId, this, existingPartitions, coroutineContext)
             }
         }
         val idGenerator = Id.Generator.newSession()
@@ -98,7 +107,7 @@ class Allocator(
         partitionMap.set(arcId, partitions)
         try {
             startPlanPartitionsOnHosts(partitions)
-            return Arc(arcId, this, partitions)
+            return Arc(arcId, this, partitions, coroutineContext)
         } catch (e: ArcHostException) {
             stopArc(arcId)
             throw e
@@ -108,7 +117,7 @@ class Allocator(
     /**
      * Stop an Arc given its [ArcId].
      */
-    suspend fun stopArc(arcId: ArcId) {
+    suspend fun stopArc(arcId: ArcId) = mutex.withLock {
         val partitions = partitionMap.readAndClearPartitions(arcId)
         stopPlanPartitionsOnHosts(partitions)
     }
@@ -133,7 +142,7 @@ class Allocator(
 
     /**
      * Finds [HandleConnection] instances which were unresolved at build time
-     * [CreateableStorageKey]) and attaches generated keys via [CapabilitiesResolver].
+     * [CreatableStorageKey]) and attaches generated keys via [CapabilitiesResolver].
      */
     private fun createStorageKeysIfNecessary(
         arcId: ArcId,
@@ -144,8 +153,15 @@ class Allocator(
         val allHandles = Plan.particleLens.traverse() + Plan.Particle.handlesLens.traverse()
 
         return allHandles.mod(plan) { handle ->
-            Plan.HandleConnection.storageKeyLens.mod(handle) {
-                replaceCreateKey(createdKeys, arcId, idGenerator, it, handle.type)
+            (Plan.HandleConnection.handleLens + Plan.Handle.storageKeyLens).mod(handle) {
+                replaceCreateKey(
+                    createdKeys,
+                    arcId,
+                    idGenerator,
+                    it,
+                    handle.type,
+                    handle.annotations
+                )
             }
         }
     }
@@ -155,11 +171,12 @@ class Allocator(
         arcId: ArcId,
         idGenerator: Id.Generator,
         storageKey: StorageKey,
-        type: Type
+        type: Type,
+        annotations: List<Annotation>
     ): StorageKey {
-        if (storageKey is CreateableStorageKey) {
+        if (storageKey is CreatableStorageKey) {
             return createdKeys.getOrPut(storageKey) {
-                createStorageKey(arcId, idGenerator, storageKey, type)
+                createStorageKey(arcId, idGenerator, type, annotations)
             }
         }
         return storageKey
@@ -172,18 +189,13 @@ class Allocator(
     private fun createStorageKey(
         arcId: ArcId,
         idGenerator: Id.Generator,
-        storageKey: CreateableStorageKey,
-        type: Type
-    ): StorageKey =
-        CapabilitiesResolver(CapabilitiesResolver.CapabilitiesResolverOptions(arcId))
-            .createStorageKey(
-                storageKey.capabilities,
-                type,
-                idGenerator.newChildId(arcId, "").toString()
-            )
-            ?: throw Exception(
-                "Unable to create storage key $storageKey"
-            )
+        type: Type,
+        annotations: List<Annotation>
+    ): StorageKey {
+        val capabilities = Capabilities.fromAnnotations(annotations)
+        return CapabilitiesResolver(CapabilitiesResolver.Options(arcId))
+            .createStorageKey(capabilities, type, idGenerator.newChildId(arcId, "").toString())
+    }
 
     /**
      * Slice plan into pieces grouped by [ArcHost], each group consisting of a [Plan.Partition]
@@ -212,14 +224,62 @@ class Allocator(
             ?: throw ParticleNotFoundException(particle)
 
     companion object {
+        /**
+         * Creates an [Allocator] which serializes Arc/Particle state to the storage system backing
+         * the provided [handleManager].
+         */
         @ExperimentalCoroutinesApi
         fun create(
             hostRegistry: HostRegistry,
-            handleManager: EntityHandleManager
+            handleManager: EntityHandleManager,
+            coroutineContext: CoroutineContext = Dispatchers.Default
         ): Allocator {
             return Allocator(
                 hostRegistry,
-                CollectionHandlePartitionMap(handleManager)
+                CollectionHandlePartitionMap(handleManager),
+                coroutineContext
+            )
+        }
+
+        /**
+         * Creates an [Allocator] which does not attempt to serialize Arc/Particle state to storage.
+         *
+         * This is primarily useful for tests, but also may be of limited use in production if Arc
+         * serialization and resurrection is not a requirement for your environment.
+         */
+        @ExperimentalCoroutinesApi
+        fun createNonSerializing(
+            hostRegistry: HostRegistry,
+            coroutineContext: CoroutineContext = Dispatchers.Default
+        ): Allocator {
+            return Allocator(
+                hostRegistry,
+                object : PartitionSerialization {
+                    private val mutex = Mutex()
+                    private val partitions = mutableMapOf<ArcId, List<Plan.Partition>>()
+
+                    override suspend fun set(
+                        arcId: ArcId,
+                        partitions: List<Plan.Partition>
+                    ) = mutex.withLock {
+                        this.partitions[arcId] = partitions
+                    }
+
+                    override suspend fun readPartitions(
+                        arcId: ArcId
+                    ): List<Plan.Partition> = mutex.withLock {
+                        this.partitions[arcId] ?: emptyList()
+                    }
+
+                    override suspend fun readAndClearPartitions(
+                        arcId: ArcId
+                    ): List<Plan.Partition> = mutex.withLock {
+                        val oldPartitions = this.partitions[arcId] ?: emptyList()
+                        this.partitions[arcId] = emptyList()
+                        oldPartitions
+                    }
+                },
+                coroutineContext
             )
         }
     }

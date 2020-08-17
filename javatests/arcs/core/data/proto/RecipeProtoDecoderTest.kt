@@ -1,7 +1,6 @@
 package arcs.core.data.proto
 
 import arcs.core.data.Annotation
-import arcs.core.data.Capabilities
 import arcs.core.data.EntityType
 import arcs.core.data.FieldType
 import arcs.core.data.HandleConnectionSpec
@@ -18,7 +17,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-
 /** Creates and [arcId] [AnnotationProto]. */
 fun arcIdAnnotationProto(id: String): AnnotationProto {
     return AnnotationProto.newBuilder()
@@ -33,6 +31,17 @@ fun arcIdAnnotationProto(id: String): AnnotationProto {
 class RecipeProtoDecoderTest {
     // The test environment.
     val ramdiskStorageKey = "ramdisk://"
+    val thingTypeProto = parseTypeProtoText("""
+       entity {
+         schema {
+           names: "Thing"
+           fields {
+             key: "name"
+             value: { primitive: TEXT }
+           }
+         }
+       } 
+    """.trimIndent())
     val thingHandleProto = HandleProto.newBuilder()
         .setName("thing")
         .setFate(HandleProto.Fate.CREATE)
@@ -43,7 +52,7 @@ class RecipeProtoDecoderTest {
         Handle.Fate.CREATE,
         TypeVariable("thing"),
         ramdiskStorageKey + "thing",
-        Capabilities.Empty
+        emptyList()
     )
     val thingSchema = Schema(
         names = setOf(SchemaName("Thing")),
@@ -61,7 +70,7 @@ class RecipeProtoDecoderTest {
         Handle.Fate.MAP,
         TypeVariable("thang"),
         ramdiskStorageKey + "thang",
-        Capabilities.Empty
+        emptyList()
     )
     val joinHandleProto = HandleProto.newBuilder()
         .setName("pairs")
@@ -75,7 +84,7 @@ class RecipeProtoDecoderTest {
         Handle.Fate.JOIN,
         TypeVariable("pairs"),
         ramdiskStorageKey + "pairs",
-        Capabilities.Empty,
+        emptyList(),
         associatedHandles = mutableListOf(thingHandle, thangHandle)
     )
     val readConnectionSpec = HandleConnectionSpec("data", HandleMode.Read, thingEntity)
@@ -89,6 +98,7 @@ class RecipeProtoDecoderTest {
     var dataConnection = HandleConnectionProto.newBuilder()
         .setName("data")
         .setHandle("thing")
+        .setType(thingTypeProto)
         .build()
     val readerParticle = ParticleProto.newBuilder()
         .setSpecName("Reader")
@@ -134,7 +144,7 @@ class RecipeProtoDecoderTest {
                 readerParticle.decode(context),
                 writerParticle.decode(context)
             )
-            assertThat(annotations).isEqualTo(listOf(Annotation.arcId("pass-through-arc")))
+            assertThat(annotations).isEqualTo(listOf(Annotation.createArcId("pass-through-arc")))
         }
     }
 
@@ -176,7 +186,7 @@ class RecipeProtoDecoderTest {
                     "pairs" to joinHandle
                 )
             )
-            assertThat(annotations).isEqualTo(listOf(Annotation.arcId("arc-with-join")))
+            assertThat(annotations).isEqualTo(listOf(Annotation.createArcId("arc-with-join")))
         }
     }
 }

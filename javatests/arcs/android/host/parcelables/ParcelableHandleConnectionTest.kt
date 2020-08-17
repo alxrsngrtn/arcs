@@ -16,11 +16,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import arcs.core.common.ArcId
 import arcs.core.data.EntityType
 import arcs.core.data.FieldType.Companion.Text
+import arcs.core.data.HandleMode
+import arcs.core.data.Plan.Handle
 import arcs.core.data.Plan.HandleConnection
 import arcs.core.data.Schema
 import arcs.core.data.SchemaFields
 import arcs.core.data.SchemaName
-import arcs.core.data.HandleMode
+import arcs.core.data.expression.asExpr
 import arcs.core.storage.keys.VolatileStorageKey
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -35,13 +37,39 @@ class ParcelableHandleConnectionTest {
         SchemaFields(mapOf("name" to Text), emptyMap()),
         "42"
     )
+    private val storageKey = VolatileStorageKey(ArcId.newForTest("foo"), "bar")
+    private val personType = EntityType(personSchema)
 
     @Test
     fun handleConnection_parcelableRoundTrip_works() {
         val handleConnection = HandleConnection(
-            VolatileStorageKey(ArcId.newForTest("foo"), "bar"),
+            Handle(storageKey, personType, emptyList()),
             HandleMode.ReadWrite,
-            EntityType(personSchema)
+            personType,
+            emptyList(),
+            true.asExpr()
+        )
+
+        val marshalled = with(Parcel.obtain()) {
+            writeTypedObject(handleConnection.toParcelable(), 0)
+            marshall()
+        }
+
+        val unmarshalled = with(Parcel.obtain()) {
+            unmarshall(marshalled, 0, marshalled.size)
+            setDataPosition(0)
+            readTypedObject(requireNotNull(ParcelableHandleConnection.CREATOR))
+        }
+
+        assertThat(unmarshalled?.actual).isEqualTo(handleConnection)
+    }
+
+    @Test
+    fun handleConnection_parcelableRoundTrip_works_nullExpression() {
+        val handleConnection = HandleConnection(
+            Handle(storageKey, personType, emptyList()),
+            HandleMode.ReadWrite,
+            personType
         )
 
         val marshalled = with(Parcel.obtain()) {

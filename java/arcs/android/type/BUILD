@@ -2,7 +2,7 @@ load("//third_party/java/arcs/build_defs:build_defs.bzl", "arcs_kt_android_libra
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//java/arcs:allowed-packages"])
 
 arcs_kt_android_library(
     name = "type",
@@ -12,6 +12,7 @@ arcs_kt_android_library(
     deps = [
         "//java/arcs/core/data",
         "//java/arcs/core/data:schema_fields",
-        "//java/arcs/core/type",
+        "//java/arcs/core/data/expression",
+        "//java/arcs/core/type",  # buildcleaner: keep
     ],
 )

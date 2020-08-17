@@ -14,7 +14,7 @@ recipes {
     name: "handle0"
     id: "products"
     fate: CREATE
-    capabilities: PERSISTENT
+    annotations: [{name: "persistent"}]
     type {
       collection {
         collection_type {
@@ -49,9 +49,13 @@ recipes {
                             schema {
                               names: "Review"
                               fields {
-                                key: "author"
+                                key: "authors"
                                 value {
-                                  primitive: TEXT
+                                  list: {
+                                    element_type: {
+                                      primitive: TEXT
+                                    }
+                                  }
                                 }
                               }
                               fields {
@@ -66,7 +70,7 @@ recipes {
                                   primitive: NUMBER
                                 }
                               }
-                              hash: "929dde429125aa5082b067886b09aa078d901f7a"
+                              hash: "305545964954fba46cfa591c6aa49c14651326b0"
                             }
                           }
                         }
@@ -81,7 +85,7 @@ recipes {
                   primitive: BOOLEAN
                 }
               }
-              hash: "22d9f8af11889c2a062d6cd7ffb58eab1de3a4c7"
+              hash: "cb527bdcc47fb828d9d75bdffa67a0951fb559ee"
             }
           }
         }
@@ -93,6 +97,82 @@ recipes {
     connections {
       name: "products"
       handle: "handle0"
+      type: {
+        collection: {
+          collection_type: {
+            entity: {
+              schema: {
+                names: "Product"
+                names: "Thing"
+                fields: {
+                  key: "name"
+                  value: {
+                    primitive: TEXT
+                  }
+                }
+                fields: {
+                  key: "dimensions"
+                  value: {
+                    collection {
+                      collection_type: {
+                        primitive: NUMBER
+                      }
+                    }
+                  }
+                }
+                fields: {
+                  key: "reviews"
+                  value: {
+                    collection: {
+                      collection_type {
+                        reference {
+                          referred_type {
+                            entity {
+                              schema {
+                                names: "Review"
+                                fields {
+                                  key: "authors"
+                                  value {
+                                    list: {
+                                      element_type: {
+                                        primitive: TEXT
+                                      }
+                                    }
+                                  }
+                                }
+                                fields {
+                                  key: "content"
+                                  value {
+                                    primitive: TEXT
+                                  }
+                                }
+                                fields {
+                                  key: "rating"
+                                  value {
+                                    primitive: NUMBER
+                                  }
+                                }
+                                hash: "305545964954fba46cfa591c6aa49c14651326b0"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                fields {
+                  key: "safeForKids"
+                  value: {
+                    primitive: BOOLEAN
+                  }
+                }
+                hash: "cb527bdcc47fb828d9d75bdffa67a0951fb559ee"
+              }
+            }
+          }
+        }
+      }
     }
   }
   annotations {
@@ -151,10 +231,42 @@ recipes {
     connections {
       name: "summary"
       handle: "handle0"
+      type {
+        entity {
+          schema {
+            fields {
+              key: "overallRating"
+              value {
+                primitive: NUMBER
+              }
+            }
+            hash: "984649bb276633d3f7b072533cf3202163eb239e"
+          }
+        }
+      }
     }
     connections {
       name: "things"
       handle: "handle1"
+      type {
+        collection {
+          collection_type {
+            entity {
+              schema {
+                names: "Thing"
+                fields {
+                  key: "name"
+                  value {
+                    primitive: TEXT
+                  }
+                }
+                hash: "25e71af4e9fc8b6958fc46a8f4b7cdf6b5f31516"
+              }
+            }
+          }
+        }
+
+      }
     }
   }
 }
@@ -197,9 +309,13 @@ particle_specs {
                             schema {
                               names: "Review"
                               fields {
-                                key: "author"
+                                key: "authors"
                                 value {
-                                  primitive: TEXT
+                                  list: {
+                                    element_type: {
+                                      primitive: TEXT
+                                    }
+                                  }
                                 }
                               }
                               fields {
@@ -214,7 +330,7 @@ particle_specs {
                                   primitive: NUMBER
                                 }
                               }
-                              hash: "929dde429125aa5082b067886b09aa078d901f7a"
+                              hash: "305545964954fba46cfa591c6aa49c14651326b0"
                             }
                           }
                         }
@@ -229,7 +345,7 @@ particle_specs {
                   primitive: BOOLEAN
                 }
               }
-              hash: "22d9f8af11889c2a062d6cd7ffb58eab1de3a4c7"
+              hash: "cb527bdcc47fb828d9d75bdffa67a0951fb559ee"
             }
           }
         }
@@ -324,5 +440,5 @@ policies {
     }
   }
   description: "check that policies can be serialized to proto"
-  egress_type: LOGGING
+  egress_type: 'Logging'
 }

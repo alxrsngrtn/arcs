@@ -27,15 +27,15 @@ import android.widget.RadioButton
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import arcs.core.data.CollectionType
+import arcs.core.data.EntityType
 import arcs.core.data.HandleMode
-import arcs.core.entity.EntitySpec
-import arcs.core.entity.HandleContainerType
-import arcs.core.entity.HandleDataType
+import arcs.core.data.SingletonType
 import arcs.core.entity.HandleSpec
-import arcs.core.entity.HandleSpec.Companion.toType
 import arcs.core.entity.ReadSingletonHandle
 import arcs.core.entity.awaitReady
 import arcs.core.host.EntityHandleManager
+import arcs.core.storage.StoreManager
 import arcs.jvm.host.JvmSchedulerProvider
 import arcs.jvm.util.JvmTime
 import arcs.sdk.ReadCollectionHandle
@@ -77,15 +77,25 @@ class TestActivity : AppCompatActivity() {
     private var iterationIntervalMs: Int
     private var timesOfIterations: Int
     private var dataSizeInBytes: Int
+    private var clearedEntities: Int
     private var delayedStartMs: Int
     private var storageServiceCrashRate: Int
     private var storageClientCrashRate: Int
     private var intentReceiver: BroadcastReceiver? = null
     private var bound = atomic(false)
     private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) = bound.update { true }
+        override fun onServiceConnected(name: ComponentName, service: IBinder) = bound.update {
+            true
+        }
         override fun onServiceDisconnected(name: ComponentName) = bound.update { false }
     }
+
+    private val stores = StoreManager(
+        activationFactory = ServiceStoreFactory(
+            this,
+            coroutineContext
+        )
+    )
 
     init {
         // Supply the default settings being displayed on UI at app. startup.
@@ -95,6 +105,7 @@ class TestActivity : AppCompatActivity() {
             iterationIntervalMs = it.iterationIntervalMs
             timesOfIterations = it.timesOfIterations
             dataSizeInBytes = it.dataSizeInBytes
+            clearedEntities = it.clearedEntities
             delayedStartMs = it.delayedStartMs
             storageServiceCrashRate = it.storageServiceCrashRate
             storageClientCrashRate = it.storageClientCrashRate
@@ -109,11 +120,8 @@ class TestActivity : AppCompatActivity() {
         handleManager = EntityHandleManager(
             time = JvmTime,
             scheduler = schedulerProvider("sysHealthTestActivity"),
-            activationFactory = ServiceStoreFactory(
-                this,
-                lifecycle,
-                coroutineContext
-            )
+            stores = stores
+
         )
 
         resultTextView = findViewById(R.id.result)
@@ -236,8 +244,15 @@ class TestActivity : AppCompatActivity() {
             SystemHealthTextWatch {
                 dataSizeInBytes = it.toIntOrNull()?.takeIf {
                     it >= SystemHealthTestEntity.BASE_BOOLEAN.toString().length +
-                    SystemHealthTestEntity.BASE_SEQNO.toString().length
+                        SystemHealthTestEntity.BASE_SEQNO.toString().length
                 } ?: dataSizeInBytes
+            }
+        )
+        findViewById<TextView>(R.id.cleared_entities).also {
+            it.text = clearedEntities.toString()
+        }.addTextChangedListener(
+            SystemHealthTextWatch {
+                clearedEntities = it.toIntOrNull() ?: clearedEntities
             }
         )
         findViewById<TextView>(R.id.delayed_start_ms).also {
@@ -256,9 +271,11 @@ class TestActivity : AppCompatActivity() {
         }.also {
             it.setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(seekBar: SeekBar?,
-                                                   progress: Int,
-                                                   fromUser: Boolean) {
+                    override fun onProgressChanged(
+                        seekBar: SeekBar?,
+                        progress: Int,
+                        fromUser: Boolean
+                    ) {
                         storageServiceCrashRate = progress
                         serviceProbabilityLabel.text = getString(
                             R.string.storage_service_crash_rate, progress)
@@ -279,9 +296,11 @@ class TestActivity : AppCompatActivity() {
         }.also {
             it.setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(seekBar: SeekBar?,
-                                                   progress: Int,
-                                                   fromUser: Boolean) {
+                    override fun onProgressChanged(
+                        seekBar: SeekBar?,
+                        progress: Int,
+                        fromUser: Boolean
+                    ) {
                         storageClientCrashRate = progress
                         clientProbabilityLabel.text = getString(
                             R.string.storage_client_crash_rate, progress)
@@ -298,8 +317,8 @@ class TestActivity : AppCompatActivity() {
         // so as to display the enclosing messages on UI.
         intentReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                intent.getStringExtra(SystemHealthEnums.Function.SHOW_RESULTS.name)?.let { results ->
-                    resultTextView.text = results
+                intent.getStringExtra(SystemHealthEnums.Function.SHOW_RESULTS.name)?.let { result ->
+                    resultTextView.text = result
                 }
             }
         }.also {
@@ -320,7 +339,10 @@ class TestActivity : AppCompatActivity() {
                         else -> LocalService::class.java
                     }
                 )
-                intent.putExtra(it.function, SystemHealthEnums.Function.LATENCY_BACKPRESSURE_TEST.name)
+                intent.putExtra(
+                    it.function,
+                    SystemHealthEnums.Function.LATENCY_BACKPRESSURE_TEST.name
+                )
                 intent.putExtra(it.handleType, handleType.name)
                 intent.putExtra(it.storage_mode, storageMode.name)
                 intent.putExtra(it.numOfListenerThreads, numOfListenerThreads)
@@ -328,6 +350,7 @@ class TestActivity : AppCompatActivity() {
                 intent.putExtra(it.iterationIntervalMs, iterationIntervalMs)
                 intent.putExtra(it.timesOfIterations, timesOfIterations)
                 intent.putExtra(it.dataSizeInBytes, dataSizeInBytes)
+                intent.putExtra(it.clearedEntities, clearedEntities)
                 intent.putExtra(it.delayedStartMs, delayedStartMs)
                 intent.putExtra(it.storageServiceCrashRate, storageServiceCrashRate)
                 intent.putExtra(it.storageClientCrashRate, storageClientCrashRate)
@@ -354,6 +377,7 @@ class TestActivity : AppCompatActivity() {
                 intent.putExtra(it.iterationIntervalMs, iterationIntervalMs)
                 intent.putExtra(it.timesOfIterations, timesOfIterations)
                 intent.putExtra(it.dataSizeInBytes, dataSizeInBytes)
+                intent.putExtra(it.clearedEntities, clearedEntities)
                 intent.putExtra(it.delayedStartMs, delayedStartMs)
                 intent.putExtra(it.storageServiceCrashRate, storageServiceCrashRate)
                 intent.putExtra(it.storageClientCrashRate, storageClientCrashRate)
@@ -372,6 +396,7 @@ class TestActivity : AppCompatActivity() {
         runBlocking(coroutineContext) {
             singletonHandle?.close()
             collectionHandle?.close()
+            stores.reset()
         }
 
         scope.cancel()
@@ -402,15 +427,12 @@ class TestActivity : AppCompatActivity() {
                             HandleSpec(
                                 "singletonHandle",
                                 HandleMode.ReadWrite,
-                                toType(
-                                    TestEntity.Companion,
-                                    HandleDataType.Entity,
-                                    HandleContainerType.Singleton
-                                ),
-                                setOf<EntitySpec<*>>(TestEntity.Companion)
+                                SingletonType(EntityType(TestEntity.SCHEMA)),
+                                TestEntity
                             ),
                             when (storageMode) {
-                                TestEntity.StorageMode.PERSISTENT -> TestEntity.singletonPersistentStorageKey
+                                TestEntity.StorageMode.PERSISTENT ->
+                                    TestEntity.singletonPersistentStorageKey
                                 else -> TestEntity.singletonInMemoryStorageKey
                             }
                         ).awaitReady() as ReadWriteSingletonHandle<TestEntity>
@@ -438,17 +460,15 @@ class TestActivity : AppCompatActivity() {
                 ReadWriteCollectionHandle::class -> {
                     if (collectionHandle == null) {
                         val handle = handleManager.createHandle(
-                            HandleSpec("collectionHandle",
-                                       HandleMode.ReadWrite,
-                                       toType(
-                                           TestEntity.Companion,
-                                           HandleDataType.Entity,
-                                           HandleContainerType.Collection
-                                       ),
-                                       setOf<EntitySpec<*>>(TestEntity.Companion)
+                            HandleSpec(
+                                "collectionHandle",
+                                HandleMode.ReadWrite,
+                                CollectionType(EntityType(TestEntity.SCHEMA)),
+                                TestEntity
                             ),
                             when (storageMode) {
-                                TestEntity.StorageMode.PERSISTENT -> TestEntity.collectionPersistentStorageKey
+                                TestEntity.StorageMode.PERSISTENT ->
+                                    TestEntity.collectionPersistentStorageKey
                                 else -> TestEntity.collectionInMemoryStorageKey
                             }
                         ).awaitReady() as ReadWriteCollectionHandle<TestEntity>

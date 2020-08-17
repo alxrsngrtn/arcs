@@ -14,6 +14,7 @@ package arcs.jvm.host
 import arcs.core.host.SchedulerProvider
 import arcs.core.util.Scheduler
 import arcs.core.util.TaggedLog
+import arcs.jvm.util.JvmTime
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -61,7 +62,7 @@ class JvmSchedulerProvider(
                     val thread = threads[threadIndex % maxThreadCount]
                     if (thread != null && thread.isAlive) return@newSingleThreadExecutor thread
 
-                    if (thread?.isAlive == false) log.warning {
+                    if (thread?.isAlive == false) log.info {
                         "Creating a new thread (index: ${threadIndex % maxThreadCount}) because " +
                             "a previously-created one had died."
                     }
@@ -87,7 +88,7 @@ class JvmSchedulerProvider(
             CoroutineName("ArcId::$arcId") +
             dispatcher
 
-        return Scheduler(schedulerContext).also { schedulersByArcId[arcId] = it }
+        return Scheduler(schedulerContext, timer = JvmTime).also { schedulersByArcId[arcId] = it }
     }
 
     @Synchronized

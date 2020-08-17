@@ -9,7 +9,7 @@
  */
 
 import {assert} from '../../platform/assert-web.js';
-import {ParticleSpec} from '../particle-spec.js';
+import {ParticleSpec} from '../manifest-types/particle-spec.js';
 import {Schema} from '../schema.js';
 import {Type, TypeVariable, TypeVariableInfo, TupleType, CollectionType} from '../type.js';
 import {Slot} from './slot.js';
@@ -18,12 +18,12 @@ import {SlotConnection} from './slot-connection.js';
 import {Recipe, CloneMap, RecipeComponent, IsResolvedOptions, IsValidOptions, ToStringOptions, VariableMap} from './recipe.js';
 import {TypeChecker, TypeListInfo} from './type-checker.js';
 import {compareArrays, compareComparables, compareStrings, Comparable} from './comparable.js';
-import {Fate, Direction} from '../manifest-ast-nodes.js';
-import {ClaimIsTag, Claim} from '../particle-claim.js';
-import {StorageKey} from '../storageNG/storage-key.js';
-import {Capabilities, Ttl} from '../capabilities.js';
+import {Fate} from '../manifest-ast-nodes.js';
+import {Direction} from '../manifest-types/enums.js';
+import {StorageKey} from '../storage/storage-key.js';
+import {Capabilities, Ttl, Queryable} from '../capabilities.js';
 import {AnnotationRef} from './annotation.js';
-import {StoreClaims} from '../storageNG/abstract-store.js';
+import {StoreClaims} from '../storage/abstract-store.js';
 
 export class Handle implements Comparable<Handle> {
   private readonly _recipe: Recipe;
@@ -153,6 +153,7 @@ export class Handle implements Comparable<Handle> {
     if (isSlotType(resolvedType) || isSlotType(collectionType)) {
       this._fate = '`slot';
     }
+    this.updateCapabilities();
   }
 
   _finishNormalize() {
@@ -213,6 +214,11 @@ export class Handle implements Comparable<Handle> {
 
     this.claims = storage.claims;
   }
+  restrictType(restrictedType: Type) {
+    assert(this.type && this.type.isAtLeastAsSpecificAs(restrictedType));
+    this._type = restrictedType;
+  }
+
   get localName() { return this._localName; }
   set localName(name: string) { this._localName = name; }
   get connections() { return this._connections; } // HandleConnection*
@@ -233,7 +239,7 @@ export class Handle implements Comparable<Handle> {
     annotations.every(a => assert(a.isValidForTarget('Handle'),
         `Annotation '${a.name}' is invalid for Handle`));
     this._annotations = annotations;
-    this._capabilities = Capabilities.fromAnnotations(this.annotations);
+    this.updateCapabilities();
   }
   getAnnotation(name: string): AnnotationRef | null {
     const annotations = this.findAnnotations(name);
@@ -248,6 +254,18 @@ export class Handle implements Comparable<Handle> {
   get capabilities(): Capabilities {
     return this._capabilities;
   }
+
+  private updateCapabilities(): void {
+    // Combines capabilities extracted from annotations with implicit
+    // capabilities derived from the recipe.
+    this._capabilities = Capabilities.fromAnnotations(this.annotations);
+    if (this._connections.some(c => c.type && c.type.getEntitySchema()
+        && c.type.getEntitySchema().refinement)) {
+      this._capabilities.setCapability(new Queryable(true));
+    }
+    // Note: Consider adding `Shareable` if handle has an id, or used in other recipes.
+  }
+
   getTtl(): Ttl {
     return this.capabilities.getTtl() || Ttl.infinite();
   }
@@ -278,7 +296,7 @@ export class Handle implements Comparable<Handle> {
       typeSet.push({
         // We forced the joined handles to be collections and resolve their type first,
         // so that we can pull out their collection type here.
-        type: new TupleType(this.joinedHandles.map(h => (h.type as CollectionType<Type>).collectionType.referenceTo())).collectionOf(),
+        type: new TupleType(this.joinedHandles.map(h => (h.type as CollectionType<Type>).collectionType)).collectionOf(),
         direction: 'writes'
       });
     }

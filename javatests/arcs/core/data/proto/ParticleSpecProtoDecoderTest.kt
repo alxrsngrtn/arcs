@@ -1,6 +1,7 @@
 package arcs.core.data.proto
 
 import arcs.core.data.AccessPath
+import arcs.core.data.Annotation
 import arcs.core.data.Check
 import arcs.core.data.Claim
 import arcs.core.data.EntityType
@@ -59,18 +60,28 @@ class ParticleSpecProtoDecoderTest {
         }
     }
 
+    private val schema = Schema(
+        names = setOf(SchemaName("Thing")),
+        fields = SchemaFields(
+            mapOf<FieldName, FieldType>("name" to FieldType.Text),
+            mapOf()),
+        // TODO: Hash.
+        hash = ""
+    )
+
     private fun getHandleConnectionSpecProto(
         name: String,
         direction: String,
-        schemaName: String
+        schemaName: String,
+        expression: String? = null
     ): String {
         return """
-        name: "${name}"
-        direction: ${direction}
+        name: "$name"
+        direction: $direction
         type {
           entity {
             schema {
-              names: "${schemaName}"
+              names: "$schemaName"
               fields {
                 key: "name"
                 value: { primitive: TEXT }
@@ -78,20 +89,30 @@ class ParticleSpecProtoDecoderTest {
             }
           }
         }
+        ${expression?.let { "expression: \"$it\"" } ?: ""}
         """.trimIndent()
     }
 
     @Test
     fun decodesHandleConnectionSpecProto() {
-        val singletons = mapOf<FieldName, FieldType>("name" to FieldType.Text)
-        val fields = SchemaFields(singletons, mapOf<FieldName, FieldType>())
-        // TODO: Hash.
         val handleConnectionSpecProto = getHandleConnectionSpecProto("data", "READS", "Thing")
-        val schema = Schema(setOf(SchemaName("Thing")), fields, hash="")
         val connectionSpec = decodeHandleConnectionSpecProto(handleConnectionSpecProto)
         assertThat(connectionSpec.name).isEqualTo("data")
         assertThat(connectionSpec.direction).isEqualTo(HandleMode.Read)
         assertThat(connectionSpec.type).isEqualTo(EntityType(schema))
+        assertThat(connectionSpec.expression).isNull()
+    }
+
+    @Test
+    fun decodesHandleConnectionSpecProto_withExpression() {
+        val handleConnectionSpecProto = getHandleConnectionSpecProto(
+            "data", "READS", "Thing", "expression-literal"
+        )
+        val connectionSpec = decodeHandleConnectionSpecProto(handleConnectionSpecProto)
+        assertThat(connectionSpec.name).isEqualTo("data")
+        assertThat(connectionSpec.direction).isEqualTo(HandleMode.Read)
+        assertThat(connectionSpec.type).isEqualTo(EntityType(schema))
+        assertThat(connectionSpec.expression).isEqualTo("expression-literal")
     }
 
     @Test
@@ -100,27 +121,46 @@ class ParticleSpecProtoDecoderTest {
         val writeConnectionSpecProto = getHandleConnectionSpecProto("write", "WRITES", "Thing")
         val readerSpecProto = """
           name: "Reader"
-          connections { ${readConnectionSpecProto} }
+          connections { $readConnectionSpecProto }
           location: "Everywhere"
+          annotations {
+            name: "isolated"
+          }
         """.trimIndent()
         val readerSpec = decodeParticleSpecProto(readerSpecProto)
         val readConnectionSpec = decodeHandleConnectionSpecProto(readConnectionSpecProto)
-        assertThat(readerSpec.name).isEqualTo("Reader")
-        assertThat(readerSpec.location).isEqualTo("Everywhere")
-        assertThat(readerSpec.connections).isEqualTo(mapOf("read" to readConnectionSpec))
+        assertThat(readerSpec).isEqualTo(
+            ParticleSpec(
+                name = "Reader",
+                location = "Everywhere",
+                connections = mapOf("read" to readConnectionSpec),
+                annotations = listOf(Annotation.isolated)
+            )
+        )
 
         val readerWriterSpecProto = """
           name: "ReaderWriter"
-          connections { ${readConnectionSpecProto} }
-          connections { ${writeConnectionSpecProto} }
+          connections { $readConnectionSpecProto }
+          connections { $writeConnectionSpecProto }
           location: "Nowhere"
+          annotations {
+            name: "egress"
+            params {
+              name: "type"
+              str_value: "MyEgressType"
+            }
+          }
         """.trimIndent()
         val readerWriterSpec = decodeParticleSpecProto(readerWriterSpecProto)
         val writeConnectionSpec = decodeHandleConnectionSpecProto(writeConnectionSpecProto)
-        assertThat(readerWriterSpec.name).isEqualTo("ReaderWriter")
-        assertThat(readerWriterSpec.location).isEqualTo("Nowhere")
-        assertThat(readerWriterSpec.connections).isEqualTo(
-            mapOf("read" to readConnectionSpec, "write" to writeConnectionSpec))
+        assertThat(readerWriterSpec).isEqualTo(
+            ParticleSpec(
+                name = "ReaderWriter",
+                location = "Nowhere",
+                connections = mapOf("read" to readConnectionSpec, "write" to writeConnectionSpec),
+                annotations = listOf(Annotation.createEgress("MyEgressType"))
+            )
+        )
     }
 
     @Test
@@ -129,14 +169,16 @@ class ParticleSpecProtoDecoderTest {
         val writeConnectionSpecProto = getHandleConnectionSpecProto("write", "WRITES", "Thing")
         val readerWriterSpecProto = """
           name: "ReaderWriter"
-          connections { ${readConnectionSpecProto} }
-          connections { ${writeConnectionSpecProto} }
+          connections { $readConnectionSpecProto }
+          connections { $writeConnectionSpecProto }
           location: "Nowhere"
           claims {
             assume {
               access_path {
-                particle_spec: "ReaderWriter"
-                handle_connection: "write"
+                handle {
+                  particle_spec: "ReaderWriter"
+                  handle_connection: "write"
+                }
               }
               predicate {
                 label {
@@ -148,12 +190,16 @@ class ParticleSpecProtoDecoderTest {
           claims {
             derives_from {
               target {
-                particle_spec: "ReaderWriter"
-                handle_connection: "write"
+                handle {
+                  particle_spec: "ReaderWriter"
+                  handle_connection: "write"
+                }
               }
               source {
-                particle_spec: "ReaderWriter"
-                handle_connection: "read"
+                handle {
+                  particle_spec: "ReaderWriter"
+                  handle_connection: "read"
+                }
               }
             }
           }
@@ -178,12 +224,14 @@ class ParticleSpecProtoDecoderTest {
         val readConnectionSpecProto = getHandleConnectionSpecProto("read", "READS", "Thing")
         val readerWriterSpecProto = """
           name: "ReaderWriter"
-          connections { ${readConnectionSpecProto} }
+          connections { $readConnectionSpecProto }
           location: "Nowhere"
           checks {
             access_path {
-              particle_spec: "ReaderWriter"
-              handle_connection: "read"
+              handle {
+                particle_spec: "ReaderWriter"
+                handle_connection: "read"
+              }
             }
             predicate {
               label {
@@ -193,8 +241,10 @@ class ParticleSpecProtoDecoderTest {
           }
           checks {
             access_path {
-              particle_spec: "ReaderWriter"
-              handle_connection: "read"
+              handle {
+                particle_spec: "ReaderWriter"
+                handle_connection: "read"
+              }
             }
             predicate {
               label {
@@ -222,8 +272,8 @@ class ParticleSpecProtoDecoderTest {
         val readConnectionSpecProto = getHandleConnectionSpecProto("read", "READS", "Thing")
         val readerSpecProto = """
           name: "Reader"
-          connections { ${readConnectionSpecProto} }
-          connections { ${readConnectionSpecProto} }
+          connections { $readConnectionSpecProto }
+          connections { $readConnectionSpecProto }
           location: "Everywhere"
         """.trimIndent()
         val exception = assertFailsWith<IllegalArgumentException> {

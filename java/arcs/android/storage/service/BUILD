@@ -3,7 +3,7 @@ load("//tools/build_defs/android:rules.bzl", "android_library")
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//java/arcs:allowed-packages"])
 
 android_library(
     name = "aidl",
@@ -22,9 +22,12 @@ arcs_kt_android_library(
         "//java/arcs/android/storage",
         "//java/arcs/android/storage:proxy_message_android_proto",
         "//java/arcs/android/util",
+        "//java/arcs/core/common",
         "//java/arcs/core/crdt",
         "//java/arcs/core/host",
         "//java/arcs/core/storage",
+        "//java/arcs/core/storage/database",
+        "//java/arcs/core/storage/driver",
         "//java/arcs/core/storage/util",
         "//java/arcs/core/util",
         "//third_party/java/androidx/annotation",

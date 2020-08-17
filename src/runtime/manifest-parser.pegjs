@@ -51,7 +51,7 @@
   }
 
   function checkNormal(result, path: string = '') {
-    if (['string', 'number', 'boolean'].includes(typeof result) || result === null) {
+    if (['string', 'number', 'bigint', 'boolean'].includes(typeof result) || result === null) {
       return;
     }
     if (result === undefined) {
@@ -93,7 +93,9 @@
   }
 
   function toAstNode<T extends {location: IFileRange} & Omit<T, 'location'>>(data: Omit<T, 'location'>): T {
-    return {...data, location: location()} as T;
+    const loc = location();
+    loc['text'] = text();
+    return {...data, location: loc} as T;
   }
 
   function buildInterfaceArgument(name: string, direction: AstNode.Direction | AstNode.SlotDirection, isOptional: boolean, type: AstNode.ParticleHandleConnectionType) {
@@ -174,7 +176,6 @@ ManifestItem
   / Resource
   / AnnotationNode
   / Policy
-  / Adapter
 
 Annotation = annotationRefs:(SameIndent AnnotationRef eolWhiteSpace)*
   {
@@ -326,6 +327,10 @@ ManifestStorageInlineData
   {
     return Number(text());
   }
+  / '-'? [0-9]+ ('.' [0-9]+)? 'n'
+  {
+    return BigInt(text());
+  }
   / bool:('true'i / 'false'i)
   {
     return bool.toLowerCase() === 'true';
@@ -426,8 +431,8 @@ Particle
     const args: AstNode.ParticleHandleConnection[] = [];
     const modality: string[] = [];
     const slotConnections: AstNode.RecipeParticleSlotConnection[] = [];
-    const trustClaims: AstNode.ParticleClaimStatement[] = [];
-    const trustChecks: AstNode.ParticleCheckStatement[] = [];
+    const trustClaims: AstNode.ClaimStatement[] = [];
+    const trustChecks: AstNode.CheckStatement[] = [];
     let description: AstNode.Description | null = null;
     let hasParticleHandleConnection = false;
     verbs = optional(verbs, parsedOutput => parsedOutput[1], []);
@@ -455,9 +460,9 @@ Particle
           location: location() // TODO: FIXME Get the locations of the item descriptions.
         } as AstNode.Description;
         item.description.forEach(d => description[d.name] = d.pattern || d.patterns[0]);
-      } else if (item.kind === 'particle-trust-claim') {
+      } else if (item.kind === 'claim') {
         trustClaims.push(item);
-      } else if (item.kind === 'particle-trust-check') {
+      } else if (item.kind === 'check') {
         trustChecks.push(item);
       } else if (item.modality) {
         modality.push(item.modality);
@@ -491,69 +496,69 @@ ParticleItem "a particle item"
   / ParticleSlotConnection
   / Description
   / ParticleHandleConnection
-  / ParticleClaimStatement
-  / ParticleCheckStatement
+  / ClaimStatement
+  / CheckStatement
 
-ParticleClaimStatement
-  = 'claim' whiteSpace target:dottedFields whiteSpace expression:ParticleClaimExpression eolWhiteSpace
+ClaimStatement
+  = 'claim' whiteSpace target:dottedFields whiteSpace expression:ClaimExpression eolWhiteSpace
   {
     const targetParts = target.split('.');
     const handle = targetParts[0];
     const fieldPath = targetParts.slice(1);
-    return toAstNode<AstNode.ParticleClaimStatement>({
-      kind: 'particle-trust-claim',
+    return toAstNode<AstNode.ClaimStatement>({
+      kind: 'claim',
       handle,
       fieldPath,
       expression,
     });
   }
 
-ParticleClaimExpression
-  = first:ParticleClaim rest:(whiteSpace 'and' whiteSpace ParticleClaim)*
+ClaimExpression
+  = first:Claim rest:(whiteSpace 'and' whiteSpace Claim)*
   {
-    return [first, ...rest.map(item => item[3])] as AstNode.ParticleClaimExpression;
+    return [first, ...rest.map(item => item[3])] as AstNode.ClaimExpression;
   }
 
-ParticleClaim
-  = ParticleClaimIsTag
-  / ParticleClaimDerivesFrom
+Claim
+  = ClaimIsTag
+  / ClaimDerivesFrom
 
-ParticleClaimIsTag
+ClaimIsTag
   = 'is' whiteSpace not:('not' whiteSpace)? tag:lowerIdent
   {
-    return toAstNode<AstNode.ParticleClaimIsTag>({
-      kind: 'particle-trust-claim-is-tag',
-      claimType: ClaimType.IsTag,
+    return toAstNode<AstNode.ClaimIsTag>({
+      kind: 'claim-is-tag',
+      claimType: AstNode.ClaimType.IsTag,
       isNot: not != null,
       tag,
     });
   }
 
-ParticleClaimDerivesFrom
+ClaimDerivesFrom
   = 'derives from' whiteSpace target:dottedFields
   {
     const targetParts = target.split('.');
     const handle = targetParts[0];
     const fieldPath = targetParts.slice(1);
-    return toAstNode<AstNode.ParticleClaimDerivesFrom>({
-      kind: 'particle-trust-claim-derives-from',
-      claimType: ClaimType.DerivesFrom,
+    return toAstNode<AstNode.ClaimDerivesFrom>({
+      kind: 'claim-derives-from',
+      claimType: AstNode.ClaimType.DerivesFrom,
       parentHandle: handle,
       fieldPath,
     });
   }
 
-ParticleCheckStatement
-  = 'check' whiteSpace target:ParticleCheckTarget whiteSpace expression:ParticleCheckExpressionBody eolWhiteSpace
+CheckStatement
+  = 'check' whiteSpace target:CheckTarget whiteSpace expression:CheckExpressionBody eolWhiteSpace
   {
-    return toAstNode<AstNode.ParticleCheckStatement>({
-      kind: 'particle-trust-check',
+    return toAstNode<AstNode.CheckStatement>({
+      kind: 'check',
       target,
       expression,
     });
   }
 
-ParticleCheckTarget
+CheckTarget
   = target:dottedFields isSlot:(whiteSpace 'data')?
   {
     const targetParts = target.split('.');
@@ -562,8 +567,8 @@ ParticleCheckTarget
     if (isSlot && fieldPath.length) {
       error('Checks on slots cannot specify a field');
     }
-    return toAstNode<AstNode.ParticleCheckTarget>({
-      kind: 'particle-check-target',
+    return toAstNode<AstNode.CheckTarget>({
+      kind: 'check-target',
       targetType: isSlot ? 'slot' : 'handle',
       name,
       fieldPath,
@@ -571,8 +576,8 @@ ParticleCheckTarget
   }
 
 // A series of check conditions using `and`/`or` operations (doesn't need to be surrounded by parentheses).
-ParticleCheckExpressionBody
-  = left:ParticleCheckExpression rest:(whiteSpace ('or'/'and') whiteSpace ParticleCheckExpression)*
+CheckExpressionBody
+  = left:CheckExpression rest:(whiteSpace ('or'/'and') whiteSpace CheckExpression)*
   {
     if (rest.length === 0) {
       return left;
@@ -582,75 +587,75 @@ ParticleCheckExpressionBody
       expected(`You cannot combine 'and' and 'or' operations in a single check expression. You must nest them inside parentheses.`);
     }
     const operator = rest[0][1];
-    return toAstNode<AstNode.ParticleCheckBooleanExpression>({
-      kind: 'particle-trust-check-boolean-expression',
+    return toAstNode<AstNode.CheckBooleanExpression>({
+      kind: 'check-boolean-expression',
       operator,
       children: [left, ...rest.map(item => item[3])],
     });
   }
 
 // Can be either a single check condition, or a series of conditions using `and`/`or` operations surrounded by parentheses.
-ParticleCheckExpression
-  = condition:ParticleCheckCondition { return condition; }
-  / '(' whiteSpace? condition:ParticleCheckExpressionBody whiteSpace? ')' { return condition; }
+CheckExpression
+  = condition:CheckCondition { return condition; }
+  / '(' whiteSpace? condition:CheckExpressionBody whiteSpace? ')' { return condition; }
 
-ParticleCheckCondition
-  = ParticleCheckImplication
-  / ParticleCheckIsFromHandle
-  / ParticleCheckIsFromStore
-  / ParticleCheckIsFromOutput
-  / ParticleCheckHasTag
+CheckCondition
+  = CheckImplication
+  / CheckIsFromHandle
+  / CheckIsFromStore
+  / CheckIsFromOutput
+  / CheckHasTag
 
-ParticleCheckImplication
-  = '(' whiteSpace? antecedent:ParticleCheckExpression whiteSpace? '=>' whiteSpace? consequent:ParticleCheckExpression whiteSpace? ')'
+CheckImplication
+  = '(' whiteSpace? antecedent:CheckExpression whiteSpace? '=>' whiteSpace? consequent:CheckExpression whiteSpace? ')'
   {
-    return toAstNode<AstNode.ParticleCheckImplication>({
-      kind: 'particle-trust-check-implication',
-      checkType: CheckType.Implication,
+    return toAstNode<AstNode.CheckImplication>({
+      kind: 'check-implication',
+      checkType: AstNode.CheckType.Implication,
       antecedent,
       consequent,
     });
   }
 
-ParticleCheckHasTag
-  = 'is' isNot:(whiteSpace 'not')? whiteSpace tag:lowerIdent
+CheckHasTag
+  = 'is' whiteSpace isNot:('not' whiteSpace)? tag:lowerIdent
   {
-    return toAstNode<AstNode.ParticleCheckHasTag>({
-      kind: 'particle-trust-check-has-tag',
-      checkType: CheckType.HasTag,
+    return toAstNode<AstNode.CheckHasTag>({
+      kind: 'check-has-tag',
+      checkType: AstNode.CheckType.HasTag,
       isNot: !!isNot,
       tag,
     });
   }
 
-ParticleCheckIsFromHandle
+CheckIsFromHandle
   = 'is' isNot:(whiteSpace 'not')? whiteSpace 'from' whiteSpace 'handle' whiteSpace parentHandle:lowerIdent
   {
-    return toAstNode<AstNode.ParticleCheckIsFromHandle>({
-      kind: 'particle-trust-check-is-from-handle',
-      checkType: CheckType.IsFromHandle,
+    return toAstNode<AstNode.CheckIsFromHandle>({
+      kind: 'check-is-from-handle',
+      checkType: AstNode.CheckType.IsFromHandle,
       isNot: !!isNot,
       parentHandle,
     });
   }
 
-ParticleCheckIsFromOutput
+CheckIsFromOutput
   = 'is' isNot:(whiteSpace 'not')? whiteSpace 'from' whiteSpace 'output' whiteSpace output:lowerIdent
   {
-    return toAstNode<AstNode.ParticleCheckIsFromOutput>({
-      kind: 'particle-trust-check-is-from-output',
-      checkType: CheckType.IsFromOutput,
+    return toAstNode<AstNode.CheckIsFromOutput>({
+      kind: 'check-is-from-output',
+      checkType: AstNode.CheckType.IsFromOutput,
       isNot: !!isNot,
       output,
     });
   }
 
-ParticleCheckIsFromStore
+CheckIsFromStore
   = 'is' isNot:(whiteSpace 'not')? whiteSpace 'from' whiteSpace 'store' whiteSpace storeRef:StoreReference
   {
-    return toAstNode<AstNode.ParticleCheckIsFromStore>({
-      kind: 'particle-trust-check-is-from-store',
-      checkType: CheckType.IsFromStore,
+    return toAstNode<AstNode.CheckIsFromStore>({
+      kind: 'check-is-from-store',
+      checkType: AstNode.CheckType.IsFromStore,
       isNot: !!isNot,
       storeRef,
     });
@@ -674,7 +679,7 @@ NameWithColon
   }
 
 ParticleHandleConnectionBody
-  = name:NameWithColon? direction:(Direction '?'?)? whiteSpace type:ParticleHandleConnectionType annotations:SpaceAnnotationRefList? maybeTags:SpaceTagList?
+  = name:NameWithColon? direction:(Direction '?'?)? whiteSpace type:ParticleHandleConnectionType annotations:SpaceAnnotationRefList? maybeTags:SpaceTagList? expression:('=' multiLineSpace Expression)?
   {
     return toAstNode<AstNode.ParticleHandleConnection>({
       kind: 'particle-argument',
@@ -685,6 +690,7 @@ ParticleHandleConnectionBody
       name: name || (maybeTags && maybeTags[0]) || expected(`either a name or tags to be supplied ${name} ${maybeTags}`),
       tags: maybeTags || [],
       annotations: annotations || [],
+      expression: expression && expression[2]
     });
   }
 
@@ -744,14 +750,7 @@ BigCollectionType
   }
 
 ReferenceType
-  = 'Reference<' type:ParticleHandleConnectionType '>'
-  {
-    return toAstNode<AstNode.ReferenceType>({
-      kind: 'reference-type',
-      type,
-    });
-  }
-  / '&' type:ParticleHandleConnectionType
+  = '&' type:ParticleHandleConnectionType
   {
     return toAstNode<AstNode.ReferenceType>({
       kind: 'reference-type',
@@ -1319,26 +1318,24 @@ RecipeHandleFate
   / '`slot'
 
 RecipeHandle
-  = name:NameWithColon? fate:RecipeHandleFate ref:(whiteSpace HandleRef)? annotations:SpaceAnnotationRefList? whiteSpace? adapter:ApplyAdapter? eolWhiteSpace
+  = name:NameWithColon? fate:RecipeHandleFate ref:(whiteSpace HandleRef)? annotations:SpaceAnnotationRefList? whiteSpace? eolWhiteSpace
   {
     return toAstNode<AstNode.RecipeHandle>({
       kind: 'handle',
       name,
       ref: optional(ref, ref => ref[1], emptyRef()) as AstNode.HandleRef,
       fate,
-      annotations: annotations || [],
-      adapter
+      annotations: annotations || []
     });
   }
 
 RecipeSyntheticHandle
-  = name:NameWithColon? 'join' whiteSpace '(' whiteSpace? first:lowerIdent rest:(whiteSpace? ',' whiteSpace? lowerIdent)* ')' whiteSpace? adapter:ApplyAdapter? eolWhiteSpace
+  = name:NameWithColon? 'join' whiteSpace '(' whiteSpace? first:lowerIdent rest:(whiteSpace? ',' whiteSpace? lowerIdent)* ')' whiteSpace? eolWhiteSpace
   {
     return toAstNode<AstNode.RecipeSyntheticHandle>({
       kind: 'synthetic-handle',
       name,
       associations: [first].concat(rest.map(t => t[3])),
-      adapter,
     });
   }
 
@@ -1493,6 +1490,14 @@ SchemaInlineField
       type
     });
   }
+  / '*'
+  {
+    return toAstNode<AstNode.SchemaInlineField>({
+      kind: 'schema-inline-field',
+      name: '*',
+      type: null,
+    });
+  }
 
 SchemaSpec
   = 'schema' names:(whiteSpace ('*' / upperIdent))+ parents:SchemaExtends?
@@ -1565,7 +1570,7 @@ SchemaType
     return type;
   }
 
-SchemaCollectionType = '[' whiteSpace? schema:(SchemaReferenceType / SchemaPrimitiveType / KotlinPrimitiveType) whiteSpace? ']'
+SchemaCollectionType = '[' whiteSpace? schema:SchemaType whiteSpace? ']'
   {
     return toAstNode<AstNode.SchemaCollectionType>({
       kind: 'schema-collection',
@@ -1582,24 +1587,16 @@ SchemaOrderedListType = 'List<' whiteSpace? schema:(SchemaType) whiteSpace? '>'
     });
   }
 
-SchemaReferenceType = 'Reference<' whiteSpace? schema:(SchemaInline / TypeName) whiteSpace? '>'
+SchemaReferenceType = '&' whiteSpace? schema:(SchemaInline / TypeName)
   {
     return toAstNode<AstNode.SchemaReferenceType>({
       kind: 'schema-reference',
       schema
     });
   }
-  / '&' whiteSpace? schema:(SchemaInline / TypeName) whiteSpace?
-  {
-    return toAstNode<AstNode.SchemaReferenceType>({
-      kind: 'schema-reference',
-      schema,
-      refinement: null
-    });
-  }
 
 SchemaPrimitiveType
-  = type:('Text' / 'URL' / 'Number' / 'Boolean' / 'Bytes')
+  = type:('Text' / 'URL' / 'Number' / 'BigInt' / 'Boolean' / 'Bytes')
   {
     return toAstNode<AstNode.SchemaPrimitiveType>({
       kind: 'schema-primitive',
@@ -1609,89 +1606,48 @@ SchemaPrimitiveType
     });
   }
 
-NestedSchemaType = 'inline' whiteSpace? schema:SchemaInline
+NestedSchemaType = 'inline' whiteSpace? schema:(SchemaInline / TypeName)
   {
     return toAstNode<AstNode.NestedSchema>({
       kind: 'schema-nested',
       schema
-    }); 
+    });
   }
 
-Adapter "an adapter, (e.g. adapter Foo(param: Person { name: Text }) => Friend { nickName: param.name } )"
-  = 'adapter' whiteSpace adapterName:AdapterName '(' multiLineSpace? params:AdapterParamsDeclaration multiLineSpace? ')' whiteSpace? '=>' multiLineSpace? body:AdapterBodyDefinition eolWhiteSpace
-  {
-     return toAstNode<AstNode.AdapterNode>({
-       kind: 'adapter-node',
-       name: adapterName,
-       params,
-       body
-     });
-  }
+Expression
+  = ExpressionEntity 
 
-AdapterName
-  = upperIdent
-
-AdapterParamName
-  = fieldName
-
-AdapterParamsDeclaration
-  = param:AdapterParam restParams:(whiteSpace? ',' multiLineSpace AdapterParam)* {
-     const params = [param].concat(restParams.map(rparam => rparam[3]));
-     const names = params.map(p => p.name);
-     const duplicateNames = names.filter((item, index) => names.indexOf(item) !== index);
-     if (duplicateNames.length) {
-        error(`Duplicate adapter param names ${duplicateNames.join(',')}`);
-     } else {
-        return params;
-     }
-  }
-
-AdapterParam
-  = paramName:AdapterParamName whiteSpace? ':' whiteSpace? type:ParticleHandleConnectionType {
-     return toAstNode<AstNode.AdapterParam>({
-        kind: 'adapter-param',
-        name: paramName,
-        type
-     });
-  }
-
-AdapterBodyDefinition
-  = names:((upperIdent / '*') whiteSpace?)* '{' multiLineSpace fields:AdapterFields? ','? multiLineSpace '}' {
-     return toAstNode<AstNode.AdapterBodyDefinition>({
-        kind: 'adapter-body-definition',
+ExpressionEntity "Expression instantiating a new Arcs entity, e.g. new Foo {x: bar.x}"
+  = 'new' whiteSpace names:((upperIdent / '*') whiteSpace?)* '{' multiLineSpace fields:ExpressionEntityFields? ','? multiLineSpace '}' {
+     return toAstNode<AstNode.ExpressionEntity>({
+        kind: 'expression-entity',
         names: optional(names, names => names.map(name => name[0]).filter(name => name !== '*'), ['*']),
         fields
      });
   }
 
-AdapterFields
-  = field:AdapterField rest:(',' multiLineSpace AdapterField)* {
+ExpressionEntityFields
+  = field:ExpressionEntityField rest:(',' multiLineSpace ExpressionEntityField)* {
     return [field].concat(rest.map(rfield => rfield[2]));
   }
 
-AdapterField
-  = fieldName:fieldName whiteSpace? ':' whiteSpace? expression:AdapterScopeExpression {
-    return toAstNode<AstNode.AdapterField>({
-        kind: 'adapter-field',
+ExpressionEntityField
+  = fieldName:fieldName whiteSpace? ':' whiteSpace? expression:ExpressionScopeLookup {
+    return toAstNode<AstNode.ExpressionEntityField>({
+        kind: 'expression-entity-field',
         name: fieldName,
         expression
     });
   }
 
-AdapterScopeExpression "a dotted scope chain, starting at a root param, e.g. param.schemaFieldName.schemaFieldName"
-  = paramName:AdapterParamName scopeChain:('.' fieldName)* {
-    return toAstNode<AstNode.AdapterScopeExpression>({
-      kind: 'adapter-scope-expression',
-      scopeChain: [paramName].concat(scopeChain.map(scope => scope[1]))
-    });
-  }
+ExpressionParamName
+  = fieldName
 
-ApplyAdapter "an apply expression, e.g. apply AdapterName(param1, param2) or apply AdapterName(this)"
-  = 'apply' whiteSpace? adapterName:AdapterName '(' param:fieldName restParams:(',' whiteSpace? fieldName)* whiteSpace? ')' {
-    return toAstNode<AstNode.AppliedAdapter>({
-      kind: 'adapter-apply-node',
-      name: adapterName,
-      params: [param].concat(restParams.map(p => p[2]))
+ExpressionScopeLookup "a dotted scope chain, starting at a root param, e.g. param.schemaFieldName.schemaFieldName"
+  = paramName:ExpressionParamName scopeChain:('.' fieldName)* {
+    return toAstNode<AstNode.ExpressionScopeLookup>({
+      kind: 'expression-scope-lookup',
+      scopeChain: [paramName].concat(scopeChain.map(scope => scope[1]))
     });
   }
 
@@ -1811,10 +1767,8 @@ PrimaryExpression
     const operator = op[0];
     return toAstNode<AstNode.UnaryExpressionNode>({kind: 'unary-expression-node', expr, operator});
   }
-  / num: NumberType units:Units?
-  {
-    return toAstNode<AstNode.NumberNode>({kind: 'number-node', value: num, units});
-  }
+  / DiscreteValue
+  / NumberValue
   / bool:('true'i / 'false'i)
   {
     return toAstNode<AstNode.BooleanNode>({kind: 'boolean-node', value: bool.toLowerCase() === 'true'});
@@ -1860,10 +1814,26 @@ UnitName
     return unit+'s';
   }
 
-NumberType
-  = whole:[0-9]+ fractional:('.' [0-9]+)?
+NumberValue
+  = neg:'-'? whole:[0-9]+ decimal:('.' [0-9]*)? units:Units?
   {
-    return Number(text());
+    const value = Number(`${neg || ''}${whole.join('')}.${decimal ? decimal[1].join('') : ''}`);
+    return toAstNode<AstNode.NumberNode>({kind: 'number-node', value, units});
+  }
+
+DiscreteValue
+  = neg:'-'? val:[0-9]+ typeIdentifier:('n'/'i'/'l') units:Units?
+  {
+    const type = () => {
+      switch (typeIdentifier) {
+        case 'n': return AstNode.Primitive.BIGINT;
+        case 'i': return AstNode.Primitive.INT;
+        case 'l': return AstNode.Primitive.LONG;
+      }
+      throw new Error(`Unexpected type identifier ${typeIdentifier} (expected one of n, i or l)`);
+    };
+    const value = BigInt(`${neg || ''}${val.join('')}`);
+    return toAstNode<AstNode.DiscreteNode>({kind: 'discrete-node', value, units, type: type()});
   }
 
 Version "a version number (e.g. @012)"

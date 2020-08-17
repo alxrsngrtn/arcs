@@ -24,7 +24,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
-import kotlin.coroutines.EmptyCoroutineContext
 
 @RunWith(JUnit4::class)
 class JvmSchedulerProviderTest {
@@ -106,7 +105,7 @@ class JvmSchedulerProviderTest {
 
                 val scheduler = schedulerProvider("a")
 
-                scheduler.schedule (
+                scheduler.schedule(
                     SimpleProc("test") {
                         throw IllegalStateException("Washington DC is not a state.")
                     }
@@ -148,7 +147,10 @@ class JvmSchedulerProviderTest {
         schedulerProvider.cancelAll()
     }
 
-    private class SimpleProc(val name: String, block: () -> Unit) : Scheduler.Task.Processor(block) {
+    private class SimpleProc(
+        val name: String,
+        block: () -> Unit
+    ) : Scheduler.Task.Processor(block) {
         override fun toString() = "SimpleProc($name)"
     }
 }

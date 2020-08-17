@@ -14,6 +14,7 @@ package arcs.core.data
 import arcs.core.data.InformationFlowLabel.Predicate
 import arcs.core.data.InformationFlowLabel.SemanticTag
 import com.google.common.truth.Truth.assertThat
+import kotlin.test.assertFailsWith
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
@@ -24,8 +25,9 @@ class InformationFlowLabelTest {
         A, B, C, D;
 
         val asPredicate: Predicate.Label
-            get() = Predicate.Label(InformationFlowLabel.SemanticTag(name))
+            get() = Predicate.Label(SemanticTag(name))
     }
+
     private val labels = enumValues<Labels>().map { it.name }
     private val indicesMap: Map<InformationFlowLabel, Int> = enumValues<Labels>().map {
         it.asPredicate.label to it.ordinal
@@ -55,6 +57,30 @@ class InformationFlowLabelTest {
             .isEqualTo(Predicate.Not(Labels.A.asPredicate))
         assertThat((Labels.A.asPredicate and Labels.B.asPredicate).not())
             .isEqualTo(Predicate.Not(Predicate.And(Labels.A.asPredicate, Labels.B.asPredicate)))
+    }
+
+    @Test
+    fun andSequence() {
+        assertThat(
+            Predicate.and(Labels.A.asPredicate, Labels.B.asPredicate, Labels.C.asPredicate)
+        ).isEqualTo((Labels.A.asPredicate and Labels.B.asPredicate) and Labels.C.asPredicate)
+    }
+
+    @Test
+    fun andSequence_tooShort() {
+        assertFailsWith<IllegalArgumentException> { Predicate.and(Labels.A.asPredicate) }
+    }
+
+    @Test
+    fun orSequence() {
+        assertThat(
+            Predicate.or(Labels.A.asPredicate, Labels.B.asPredicate, Labels.C.asPredicate)
+        ).isEqualTo((Labels.A.asPredicate or Labels.B.asPredicate) or Labels.C.asPredicate)
+    }
+
+    @Test
+    fun orSequence_tooShort() {
+        assertFailsWith<IllegalArgumentException> { Predicate.or(Labels.A.asPredicate) }
     }
 
     @Test

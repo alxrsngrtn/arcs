@@ -5,6 +5,7 @@ import arcs.core.data.FieldName
 import arcs.core.data.RawEntity
 import arcs.core.data.RawEntity.Companion.UNINITIALIZED_TIMESTAMP
 import arcs.core.data.Schema
+import arcs.core.data.SchemaHash
 
 /**
  * A base [Entity] to access data from type variables.
@@ -20,13 +21,21 @@ open class VariableEntityBase(
     schema: Schema,
     entityId: String? = null,
     creationTimestamp: Long = UNINITIALIZED_TIMESTAMP,
-    expirationTimestamp: Long = UNINITIALIZED_TIMESTAMP
-) : EntityBase(entityClassName, schema, entityId, creationTimestamp, expirationTimestamp) {
+    expirationTimestamp: Long = UNINITIALIZED_TIMESTAMP,
+    isInlineEntity: Boolean = false
+) : EntityBase(
+    entityClassName,
+    schema,
+    entityId,
+    creationTimestamp,
+    expirationTimestamp,
+    isInlineEntity
+) {
     private val rawSingletons = mutableMapOf<FieldName, Referencable?>()
     private val rawCollections = mutableMapOf<FieldName, Set<Referencable>>()
 
-    override fun serialize(): RawEntity {
-        val rawEntity = super.serialize()
+    override fun serialize(storeSchema: Schema?): RawEntity {
+        val rawEntity = super.serialize(storeSchema)
         return rawEntity.copy(
             singletons = rawSingletons + rawEntity.singletons,
             collections = rawCollections + rawEntity.collections

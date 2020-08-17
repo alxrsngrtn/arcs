@@ -605,6 +605,32 @@ describe('schema', () => {
     assert.deepEqual(intersection.fields, schema3.fields);
     assert.deepEqual(intersection.refinement, schema3.refinement);
   }));
+  it('tests schema union for inlines', async () => {
+    const manifest = await Manifest.parse(`
+      particle Foo
+        schema1: reads X {y: inline Y {a: Text, b: Text}, z: Number}
+        schema2: reads X {y: inline Y {a: Text, c: Text}, w: Number, z: Number}
+    `);
+    const schema1 = getSchemaFromManifest(manifest, 'schema1');
+    const schema2 = getSchemaFromManifest(manifest, 'schema2');
+    const union = Schema.union(schema1, schema2);
+    assert.deepEqual(Object.keys(union.fields), ['y', 'z', 'w']);
+    assert.deepEqual(Object.keys(union.fields['y'].schema.model.entitySchema.fields),
+        ['a', 'b', 'c']);
+  });
+  it('tests schema union for ordered lists of inlines', async () => {
+    const manifest = await Manifest.parse(`
+      particle Foo
+        schema1: reads X {y: List<inline Y {a: Text, b: Text}>, z: Number}
+        schema2: reads X {y: List<inline Y {a: Text, c: Text}>, w: Number, z: Number}
+    `);
+    const schema1 = getSchemaFromManifest(manifest, 'schema1');
+    const schema2 = getSchemaFromManifest(manifest, 'schema2');
+    const union = Schema.union(schema1, schema2);
+    assert.deepEqual(Object.keys(union.fields), ['y', 'z', 'w']);
+    assert.deepEqual(Object.keys(union.fields['y'].schema.schema.model.entitySchema.fields),
+        ['a', 'b', 'c']);
+  });
   it('tests schema.isAtLeastAsSpecificAs, case 1', Flags.withFieldRefinementsAllowed(async () => {
     const manifest = await Manifest.parse(`
       particle Foo
@@ -685,5 +711,44 @@ describe('schema', () => {
     const schema2 = getSchemaFromManifest(manifest, 'schema2');
     const refWarning = ConCap.capture(() => assert.isTrue(schema1.isAtLeastAsSpecificAs(schema2)));
     assert.match(refWarning.warn[0], /Unable to ascertain if/);
+  });
+  it('tests to inline schema string for kt types', async () => {
+    const manifest = await Manifest.parse(`
+      schema Foo
+        ld: List<Number>
+        lI: List<Int>
+        lL: List<Long>
+        i: Int
+        t: Text
+        l: Long
+    `);
+    const schema = manifest.schemas['Foo'];
+    const schema_str = schema.toInlineSchemaString();
+    assert.strictEqual(
+      schema_str,
+      'Foo {ld: List<Number>, lI: List<Int>, lL: List<Long>, i: Int, t: Text, l: Long}'
+    );
+  });
+  it('tests restricting reference field', async () => {
+    const manifest = await Manifest.parse(`
+      schema Foo
+        foo1: Text
+        foo2: Text
+      schema Bar
+        bar1: Text
+        bar2: &Foo
+        bar3: [&Foo]
+        bar4: [Text]
+        bar5: [Float]
+      particle WriteBar
+        bar: writes Bar {bar1, bar2: &Foo {foo1}, bar4, bar5}
+        barz: writes [&Bar {bar1, bar2: &Foo {foo1}}]
+        barzz: writes Bar {bar1, bar3: [&Foo {foo1}]}
+    `);
+    const barSchema = manifest.schemas['Bar'];
+    const barConnSchema = manifest.particles[0].getConnectionByName('bar').type.getEntitySchema();
+    assert.isTrue(barSchema.isAtLeastAsSpecificAs(barConnSchema));
+    const barzzConnSchema = manifest.particles[0].getConnectionByName('barzz').type.getEntitySchema();
+    assert.isTrue(barSchema.isAtLeastAsSpecificAs(barzzConnSchema));
   });
 });

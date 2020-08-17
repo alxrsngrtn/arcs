@@ -12,26 +12,34 @@ package arcs.core.host
 
 import arcs.core.common.ArcId
 import arcs.core.data.Capabilities
+import arcs.core.data.Capability.Shareable
+import arcs.core.data.EntitySchemaProviderType
 import arcs.core.data.Plan
+import arcs.core.data.Schema
 import arcs.core.entity.Entity
 import arcs.core.entity.Handle
 import arcs.core.entity.HandleSpec
 import arcs.core.host.api.HandleHolder
 import arcs.core.host.api.Particle
-import arcs.core.storage.ActivationFactory
 import arcs.core.storage.StorageKey
 import arcs.core.storage.StoreManager
 import arcs.core.util.LruCacheMap
 import arcs.core.util.Scheduler
 import arcs.core.util.TaggedLog
 import arcs.core.util.Time
-import kotlinx.coroutines.CoroutineName
+import arcs.core.util.guardedBy
+import kotlin.coroutines.CoroutineContext
+import kotlinx.atomicfu.atomic
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 
 /** Time limit in milliseconds for all particles to reach the Running state during startup. */
@@ -53,39 +61,95 @@ typealias ParticleRegistration = Pair<ParticleIdentifier, ParticleConstructor>
  */
 @ExperimentalCoroutinesApi
 abstract class AbstractArcHost(
+    /**
+     * This coroutineContext is used to create a [CoroutineScope] that will be used to launch
+     * Arc resurrection jobs.
+     */
+    coroutineContext: CoroutineContext,
+    /**
+     * When arc states change, the state changes are serialized to handles. This serialization will
+     * happen asynchronously from the state change operation, on the [CoroutineContext] provided
+     * here.
+     */
+    updateArcHostContextCoroutineContext: CoroutineContext,
     protected val schedulerProvider: SchedulerProvider,
     vararg initialParticles: ParticleRegistration
 ) : ArcHost {
     private val log = TaggedLog { "AbstractArcHost" }
     private val particleConstructors: MutableMap<ParticleIdentifier, ParticleConstructor> =
         mutableMapOf()
+
+    private val cacheMutex = Mutex()
     /** In memory cache of [ArcHostContext] state. */
-    private val contextCache: MutableMap<String, ArcHostContext> = LruCacheMap()
+    private val contextCache: MutableMap<String, ArcHostContext> by guardedBy(
+        cacheMutex,
+        LruCacheMap()
+    )
 
+    private val runningMutex = Mutex()
     /** Arcs currently running in memory. */
-    private val runningArcs: MutableMap<String, ArcHostContext> = mutableMapOf()
+    private val runningArcs: MutableMap<String, ArcHostContext> by guardedBy(
+        runningMutex,
+        mutableMapOf()
+    )
 
-    private var paused = false
+    private var paused = atomic(false)
+
     /** Arcs to be started after unpausing. */
     private val pausedArcs: MutableList<Plan.Partition> = mutableListOf()
 
     // There can be more then one instance of a host, hashCode is used to disambiguate them
     override val hostId = "${this::class.className()}@${this.hashCode()}"
 
-    // TODO: refactor to allow clients to supply this
-    private val coroutineContext = Dispatchers.Unconfined + CoroutineName("AbstractArcHost")
     // TODO: add lifecycle API for ArcHosts shutting down to cancel running coroutines
-    private val scope = CoroutineScope(coroutineContext)
+    private val resurrectionScope = CoroutineScope(coroutineContext)
+
+    /**
+     * Supports asynchronous [ArcHostContext] serializations in observed order.
+     *
+     * TODO:
+     * make the channel per-Arc instead of per-Host for better serialization
+     * performance under multiple running and to-be-run Arcs.
+     */
+    private val contextSerializationChannel: Channel<suspend () -> Unit> =
+        Channel(Channel.UNLIMITED)
+    private val contextSerializationJob =
+        CoroutineScope(updateArcHostContextCoroutineContext).launch {
+            for (task in contextSerializationChannel) task()
+        }
 
     init {
         initialParticles.toList().associateByTo(particleConstructors, { it.first }, { it.second })
+    }
+
+    /** Wait until all observed context serializations got flushed. */
+    private suspend fun drainSerializations() {
+        if (!contextSerializationChannel.isClosedForSend) {
+            val deferred = CompletableDeferred<Boolean>()
+            contextSerializationChannel.send { deferred.complete(true) }
+            deferred.await()
+        }
+    }
+
+    private suspend fun putContextCache(id: String, context: ArcHostContext) = cacheMutex.withLock {
+        contextCache[id] = context
+    }
+
+    private suspend fun clearContextCache() = cacheMutex.withLock {
+        contextCache.clear()
+    }
+
+    private suspend fun getContextCache(arcId: String) = cacheMutex.withLock {
+        contextCache[arcId]
     }
 
     /**
      * Determines if [arcId] is currently running. It's state must be [ArcState.Running] and
      * it must be memory resident (not serialized and dormant).
      */
-    protected fun isRunning(arcId: String) = runningArcs[arcId]?.arcState == ArcState.Running
+    protected fun isRunning(arcId: String) = runBlocking {
+        runningMutex.withLock { runningArcs[arcId]?.arcState == ArcState.Running }
+    }
 
     /**
      * Lookup the [ArcHostContext] associated with the [ArcId] in [partition] and return its
@@ -95,37 +159,59 @@ abstract class AbstractArcHost(
         lookupOrCreateArcHostContext(partition.arcId).arcState
 
     override suspend fun pause() {
-        paused = true
-        runningArcs.forEach { (arcId, context) ->
+        if (!paused.compareAndSet(false, true)) {
+            return
+        }
+
+        val running = runningMutex.withLock { runningArcs.toMap() }
+        running.forEach { (arcId, context) ->
             try {
                 val partition = contextToPartition(arcId, context)
                 stopArc(partition)
                 pausedArcs.add(partition)
             } catch (e: Exception) {
-                log.error(e) { "Failure stopping arc." }
+                // TODO(b/160251910): Make logging detail more cleanly conditional.
+                log.debug(e) { "Failure stopping arc." }
+                log.info { "Failure stopping arc." }
             }
         }
+
+        /** Wait until all [runningArcs] are stopped and their [ArcHostContext]s are serialized. */
+        drainSerializations()
     }
 
     override suspend fun unpause() {
+        if (!paused.compareAndSet(true, false)) {
+            return
+        }
+
         stores.reset()
-        paused = false
+
         pausedArcs.forEach {
             try {
                 startArc(it)
             } catch (e: Exception) {
-                log.error(e) { "Failure starting arc." }
+                // TODO(b/160251910): Make logging detail more cleanly conditional.
+                log.debug(e) { "Failure starting arc." }
+                log.info { "Failure starting arc." }
             }
         }
         pausedArcs.clear()
+
+        /**
+         * Wait until all [pausedArcs]s are started or resurrected and
+         * their [ArcHostContext]s are serialized.
+         */
+        drainSerializations()
     }
 
     override suspend fun shutdown() {
         pause()
-        runningArcs.clear()
-        contextCache.clear()
+        runningMutex.withLock { runningArcs.clear() }
+        clearContextCache()
         pausedArcs.clear()
-        scope.cancel()
+        contextSerializationChannel.cancel()
+        resurrectionScope.cancel()
         schedulerProvider.cancelAll()
     }
 
@@ -133,12 +219,21 @@ abstract class AbstractArcHost(
      * This property is true if this [ArcHost] has no running, memory resident arcs, e.g.
      * running [Particle]s with active connected [Handle]s.
      */
-    protected val isArcHostIdle = runningArcs.isEmpty()
+    protected val isArcHostIdle = runBlocking {
+        runningMutex.withLock { runningArcs.isEmpty() }
+    }
 
     // VisibleForTesting
-    protected fun clearCache() {
-        contextCache.clear()
-        runningArcs.clear()
+    fun clearCache() {
+        // TODO: remove the runBlocking at arcs.core packages.
+        runBlocking {
+            // Ensure all contexts are flushed onto storage prior to clear context cache.
+            drainSerializations()
+            clearContextCache()
+            runningMutex.withLock {
+                runningArcs.clear()
+            }
+        }
     }
 
     /** Used by subclasses to register particles dynamically after [ArcHost] construction */
@@ -156,17 +251,19 @@ abstract class AbstractArcHost(
         particleConstructors.keys.toList()
 
     // VisibleForTesting
-    protected fun getArcHostContext(arcId: String) = contextCache[arcId]
+    protected fun getArcHostContext(arcId: String) = runBlocking {
+        getContextCache(arcId)
+    }
 
     protected suspend fun lookupOrCreateArcHostContext(
         arcId: String
-    ): ArcHostContext = contextCache[arcId] ?: readContextFromStorage(
+    ): ArcHostContext = getContextCache(arcId) ?: readContextFromStorage(
         createArcHostContext(arcId)
     )
 
     private fun createArcHostContext(arcId: String) = ArcHostContext(
         arcId = arcId,
-        entityHandleManager = entityHandleManager(arcId)
+        handleManager = entityHandleManager(arcId)
     )
 
     override suspend fun addOnArcStateChange(
@@ -174,30 +271,31 @@ abstract class AbstractArcHost(
         block: ArcStateChangeCallback
     ): ArcStateChangeRegistration {
         val registration = ArcStateChangeRegistration(arcId, block)
-        return lookupOrCreateArcHostContext(arcId.toString()).addOnArcStateChange(
+        val context = lookupOrCreateArcHostContext(arcId.toString())
+        return context.addOnArcStateChange(
             registration,
             block
-        )
+        ).also {
+            block(arcId, context.arcState)
+        }
     }
 
     override suspend fun removeOnArcStateChange(registration: ArcStateChangeRegistration) {
         lookupOrCreateArcHostContext(registration.arcId()).remoteOnArcStateChange(registration)
     }
 
-    private fun setArcState(context: ArcHostContext, state: ArcState) {
-        context.arcState = state
-    }
-
     /**
      * Called to persist [ArcHostContext] after [context] for [arcId] has been modified.
      */
     protected suspend fun updateArcHostContext(arcId: String, context: ArcHostContext) {
-        contextCache[arcId] = context
+        putContextCache(arcId, context)
         writeContextToStorage(arcId, context)
-        if (context.arcState == ArcState.Running) {
-            runningArcs[arcId] = context
-        } else {
-            runningArcs.remove(arcId)
+        runningMutex.withLock {
+            if (context.arcState == ArcState.Running) {
+                runningArcs[arcId] = context
+            } else {
+                runningArcs.remove(arcId)
+            }
         }
     }
 
@@ -221,7 +319,9 @@ abstract class AbstractArcHost(
                     handleSpec.key,
                     handleSpec.value,
                     handles,
-                    this.toString()
+                    this.toString(),
+                    true,
+                    (handleSpec.value.handle.type as? EntitySchemaProviderType)?.entitySchema
                 )
             }
         }
@@ -240,7 +340,7 @@ abstract class AbstractArcHost(
     ): ArcHostContext =
         createArcHostContextParticle(arcHostContext)
             .readArcHostContext(arcHostContext)
-            ?.also { contextCache[arcHostContext.arcId] = it } ?: arcHostContext
+            ?.also { putContextCache(arcHostContext.arcId, it) } ?: arcHostContext
 
     /**
      * Serializes [ArcHostContext] into [Entity] types generated by 'schema2kotlin', and
@@ -248,15 +348,47 @@ abstract class AbstractArcHost(
      *
      * Subclasses may override this to store the [context] using a different implementation.
      */
-    protected open suspend fun writeContextToStorage(arcId: String, context: ArcHostContext) =
-        createArcHostContextParticle(context).run {
-            writeArcHostContext(context.arcId, context)
+    private suspend fun writeContextToStorageInternal(arcId: String, context: ArcHostContext) {
+        try {
+            /** TODO: reuse [ArcHostContextParticle] instances if possible. */
+            createArcHostContextParticle(context).run {
+                writeArcHostContext(context.arcId, context)
+            }
+        } catch (e: Exception) {
+            log.info { "Error serializing Arc" }
+            log.debug(e) {
+                """
+                Error serializing $arcId, restart will reinvoke Particle.onFirstStart()
+                """.trimIndent()
+            }
         }
+    }
+
+    /** Serializes [ArcHostContext] onto storage asynchronously or synchronously as fall-back. */
+    protected open suspend fun writeContextToStorage(arcId: String, context: ArcHostContext) {
+        if (!contextSerializationChannel.isClosedForSend) {
+            /** Serialize the [context] to storage in observed order asynchronously. */
+            contextSerializationChannel.send {
+                writeContextToStorageInternal(
+                    arcId,
+                    ArcHostContext(
+                        context.arcId,
+                        context.particles,
+                        context.handleManager,
+                        context.arcState
+                    )
+                )
+            }
+        } else {
+            /** fall back to synchronous serialization. */
+            writeContextToStorageInternal(arcId, context)
+        }
+    }
 
     override suspend fun startArc(partition: Plan.Partition) {
         val context = lookupOrCreateArcHostContext(partition.arcId)
 
-        if (paused) {
+        if (paused.value) {
             pausedArcs.add(partition)
             return
         }
@@ -267,12 +399,18 @@ abstract class AbstractArcHost(
             return
         }
 
-        // Instantiate each particle and its handles in a ParticleContext.
-        for (particleSpec in partition.particles) {
-            val particleContext = setUpParticleAndHandles(particleSpec, context)
-            context.particles[particleSpec.particleName] = particleContext
+        for (idx in 0 until partition.particles.size) {
+            val particleSpec = partition.particles[idx]
+            val existingParticleContext = context.particles.elementAtOrNull(idx)
+            val particleContext =
+                setUpParticleAndHandles(particleSpec, existingParticleContext, context)
+            if (context.particles.size > idx) {
+                context.particles[idx] = particleContext
+            } else {
+                context.particles.add(particleContext)
+            }
             if (particleContext.particleState.failed) {
-                context.arcState = ArcState.Error
+                context.arcState = ArcState.errorWith(particleContext.particleState.cause)
                 break
             }
         }
@@ -280,15 +418,16 @@ abstract class AbstractArcHost(
         // Get each particle running.
         if (context.arcState != ArcState.Error) {
             try {
-                performParticleStartup(context.particles.values)
+                performParticleStartup(context.particles)
                 context.arcState = ArcState.Running
 
                 // If the platform supports resurrection, request it for this Arc's StorageKeys
                 maybeRequestResurrection(context)
             } catch (e: Exception) {
-                // TODO: capture the exception in context?
-                context.arcState = ArcState.Error
-                log.error(e) { "Failure performing particle startup." }
+                context.arcState = ArcState.errorWith(e)
+                // TODO(b/160251910): Make logging detail more cleanly conditional.
+                log.debug(e) { "Failure performing particle startup." }
+                log.info { "Failure performing particle startup." }
             }
         }
 
@@ -302,16 +441,13 @@ abstract class AbstractArcHost(
      */
     protected suspend fun setUpParticleAndHandles(
         spec: Plan.Particle,
+        existingParticleContext: ParticleContext?,
         context: ArcHostContext
     ): ParticleContext {
         val particle = instantiateParticle(ParticleIdentifier.from(spec.location), spec)
 
-        val particleContext = lookupParticleContextOrCreate(
-            context,
-            spec,
-            particle,
-            schedulerProvider(context.arcId)
-        )
+        val particleContext = existingParticleContext?.copyWith(particle)
+            ?: ParticleContext(particle, spec, schedulerProvider(context.arcId))
 
         if (particleContext.particleState == ParticleState.MaxFailed) {
             // Don't try recreating the particle anymore.
@@ -323,12 +459,15 @@ abstract class AbstractArcHost(
         // time by the ParticleContext state machine.
         spec.handles.forEach { (handleName, handleConnection) ->
             createHandle(
-                context.entityHandleManager,
+                context.handleManager,
                 handleName,
                 handleConnection,
                 particle.handles,
                 particle.toString(),
-                immediateSync = false
+                immediateSync = false,
+                storeSchema = (
+                    handleConnection.handle.type as? EntitySchemaProviderType
+                )?.entitySchema
             ).also {
                 particleContext.registerHandle(it)
             }
@@ -336,19 +475,6 @@ abstract class AbstractArcHost(
 
         return particleContext
     }
-
-    /**
-     * Look up an existing [ParticleContext] in the current [ArcHostContext] if it exists for
-     * the specified [Plan.Particle] and [Particle], otherwise create and initialize a new
-     * [ParticleContext].
-     */
-    protected fun lookupParticleContextOrCreate(
-        context: ArcHostContext,
-        spec: Plan.Particle,
-        particle: Particle,
-        scheduler: Scheduler
-    ) = context.particles[spec.particleName]?.copyWith(particle)
-            ?: ParticleContext(particle, spec, scheduler)
 
     /**
      * Invokes the [Particle] startup lifecycle methods and waits until all particles
@@ -395,7 +521,7 @@ abstract class AbstractArcHost(
     /** Helper used by implementors of [ResurrectableHost]. */
     @Suppress("UNUSED_PARAMETER")
     fun onResurrected(arcId: String, affectedKeys: List<StorageKey>) {
-        scope.launch {
+        resurrectionScope.launch {
             if (isRunning(arcId)) {
                 return@launch
             }
@@ -409,9 +535,7 @@ abstract class AbstractArcHost(
         Plan.Partition(
             arcId,
             hostId,
-            context.particles.map { (_, particleContext) ->
-                particleContext.planParticle
-            }
+            context.particles.map { it.planParticle }
         )
 
     /**
@@ -422,12 +546,13 @@ abstract class AbstractArcHost(
      * triggered according to the rules of the [Scheduler].
      */
     protected suspend fun createHandle(
-        handleManager: EntityHandleManager,
+        handleManager: HandleManager,
         handleName: String,
         connectionSpec: Plan.HandleConnection,
         holder: HandleHolder,
         particleId: String = "",
-        immediateSync: Boolean = true
+        immediateSync: Boolean = true,
+        storeSchema: Schema? = null
     ): Handle {
         val handleSpec = HandleSpec(
             handleName,
@@ -440,19 +565,20 @@ abstract class AbstractArcHost(
             connectionSpec.storageKey,
             connectionSpec.ttl,
             particleId,
-            immediateSync
+            immediateSync,
+            storeSchema
         ).also { holder.setHandle(handleName, it) }
     }
 
     override suspend fun stopArc(partition: Plan.Partition) {
         val arcId = partition.arcId
-        contextCache[partition.arcId]?.let { context ->
+        getContextCache(partition.arcId)?.let { context ->
             when (context.arcState) {
                 ArcState.Running, ArcState.Indeterminate -> stopArcInternal(arcId, context)
                 ArcState.NeverStarted -> stopArcError(context, "Arc $arcId was never started")
                 ArcState.Stopped -> stopArcError(context, "Arc $arcId already stopped")
                 ArcState.Deleted -> stopArcError(context, "Arc $arcId is deleted.")
-                ArcState.Error -> stopArcError(context, "Arc $arcId encounted an error.")
+                ArcState.Error -> stopArcError(context, "Arc $arcId encountered an error.")
             }
         }
     }
@@ -464,6 +590,7 @@ abstract class AbstractArcHost(
     @Suppress("UNUSED_PARAMETER", "RedundantSuspendModifier")
     private suspend fun stopArcError(context: ArcHostContext, message: String) {
         // TODO: decide how to propagate this
+        log.debug { "Error stopping arc: $message" }
     }
 
     /**
@@ -472,12 +599,12 @@ abstract class AbstractArcHost(
      */
     private suspend fun stopArcInternal(arcId: String, context: ArcHostContext) {
         try {
-            context.particles.values.forEach { it.stopParticle() }
+            context.particles.forEach { it.stopParticle() }
             maybeCancelResurrection(context)
             context.arcState = ArcState.Stopped
             updateArcHostContext(arcId, context)
         } finally {
-            context.entityHandleManager.close()
+            context.handleManager.close()
         }
     }
 
@@ -487,7 +614,7 @@ abstract class AbstractArcHost(
      */
     abstract val platformTime: Time
 
-    open val arcHostContextCapability = Capabilities.TiedToRuntime
+    open val arcHostContextCapability = Capabilities(Shareable(true))
 
     override suspend fun isHostForParticle(particle: Plan.Particle) =
         registeredParticles().contains(ParticleIdentifier.from(particle.location))
@@ -495,13 +622,12 @@ abstract class AbstractArcHost(
     /**
      * Return an instance of [EntityHandleManager] to be used to create [Handle]s.
      */
-    open fun entityHandleManager(arcId: String) = EntityHandleManager(
+    open fun entityHandleManager(arcId: String): HandleManager = EntityHandleManager(
         arcId,
         hostId,
         platformTime,
         schedulerProvider(arcId),
-        stores,
-        activationFactory
+        stores
     )
 
     /**
@@ -509,12 +635,6 @@ abstract class AbstractArcHost(
      * singleton defined statically by this package.
      */
     open val stores = singletonStores
-
-    /**
-     * The [ActivationFactory] to use when activating stores. By default this is `null`,
-     * indicating that the default [ActivationFactory] will be used.
-     */
-    open val activationFactory: ActivationFactory? = null
 
     /**
      * Instantiate a [Particle] implementation for a given [ParticleIdentifier].
