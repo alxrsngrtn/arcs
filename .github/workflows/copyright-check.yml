@@ -2,8 +2,8 @@
 name: copyright-check
 
 on:
-  push:
-    branches: [ master ]
+  pull_request:
+    branches: [ $default-branch ]
 
 jobs:
   build:
