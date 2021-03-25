@@ -18,8 +18,8 @@ jobs:
         # output the list of files who do not contain "copyright" (case
         # insensitive).
         # In this case, we want to exit the check with an error.
-        run: git diff $default-branch --diff-filter=d --name-only | xargs grep --include=\*.{ts,kt} -iL "copyright" || exit 1
+        run: git diff master --diff-filter=d --name-only | xargs grep --include=\*.{ts,kt} -iL "copyright" || exit 1
 
       - name: Check build files
-        run: git diff $default-branch --diff-filter=d --name-only | xargs grep --include=BUILD -iL "licenses" || exit 1
+        run: git diff master --diff-filter=d --name-only | xargs grep --include=BUILD -iL "licenses" || exit 1
 
