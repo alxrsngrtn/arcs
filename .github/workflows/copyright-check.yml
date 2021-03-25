@@ -12,6 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Fetch master
+      - run: |
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/*:refs/remotes/origin/*
+
+
       - name: Check Kotlin & Typescript source
         # Get all files that are different from the default branch (excluding
         # deleted files), if they are either Typescript or Kotlin files,
