@@ -3,7 +3,7 @@ name: copyright-check
 
 on:
   pull_request:
-    branches: [ $default-branch ]
+    branches: [ master ]
 
 jobs:
   build:
