@@ -3,7 +3,7 @@ name: copyright-check
 
 on:
   push:
-    branches: [ $default-branch ]
+    branches: [ master ]
 
 jobs:
   build:
