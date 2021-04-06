@@ -5,5 +5,9 @@
     "sourceMap": false,
     "outDir": "../build",
     "module": "commonjs"
-  }
+  },
+  "include": [
+    "../src/**/*.ts",
+    "any_aliases.d.ts"
+  ]
 }
