@@ -34,7 +34,7 @@ type StorageKey = {
   // A "cleaned-up" storage_key, with random sections replaced with minimal representations.
   // Useful for quick comparisons with other storage keys.
   clean_storage_key: string;
-}
+};
 
 type Type = {
   id: number,
@@ -45,7 +45,7 @@ type Type = {
   fields?: Field[],
   // A list of fields that are fields of this type (only populated when this type is an Entity)
   subFields?: Field[]
-}
+};
 
 type Field = {
   id: number,
@@ -55,24 +55,24 @@ type Field = {
   is_collection: number,
 
   subFields?: Field[]
-}
+};
 
 type FieldValue = {
   entity_storage_key_id: number,
   field_id: number,
   value_id: number
-}
+};
 
 type TextPrimitiveValue = {
   id: number,
   value: string
-}
+};
 
 type CollectionEntries = {
   collection_id: number,
   value_id: number,
   version_map: string
-}
+};
 
 type EntityRef = {
   id: number,
@@ -82,7 +82,7 @@ type EntityRef = {
   backing_storage_key: string,
   version_map: string,
   entity_storage_key: string
-}
+};
 
 const expected = [
   'types',
@@ -287,6 +287,8 @@ export class DbDumpDataModel {
         break;
       case INLINE_ENTITY_LIST:
         name = `List<inline ${name}>`;
+        break;
+      default:
         break;
     }
     console.log(`${indent}${field.name}: ${name}`);
