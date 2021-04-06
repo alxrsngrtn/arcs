@@ -292,6 +292,7 @@ export class DbDumpDataModel {
         break;
     }
     console.log(`${indent}${field.name}: ${name}`);
+    /* tslint:disable:no-unused-expression */
     field.subFields && field.subFields.forEach(field => this.printField(field, indent + '  '));
   }
 
